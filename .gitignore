@@ -208,4 +208,5 @@ __marimo__/
 
 
 *.nmea
+!sample_data/demo_track.nmea
 /output
