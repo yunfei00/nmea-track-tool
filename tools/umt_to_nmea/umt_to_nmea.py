@@ -63,6 +63,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         help="Inclusive upper bound for the relative time filter, in seconds",
     )
+    parser.add_argument(
+        "--sample-step",
+        type=parse_sample_step,
+        default=1,
+        help="Only keep every Nth input row after time filtering. Default: 1",
+    )
     return parser.parse_args()
 
 
@@ -85,6 +91,18 @@ def parse_start_datetime(value: str) -> datetime:
         parsed = parsed.astimezone(timezone.utc)
 
     return parsed
+
+
+def parse_sample_step(value: str) -> int:
+    try:
+        sample_step = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--sample-step must be a positive integer.") from exc
+
+    if sample_step <= 0:
+        raise argparse.ArgumentTypeError("--sample-step must be a positive integer.")
+
+    return sample_step
 
 
 def load_umt_points(input_path: Path) -> list[UMTPoint]:
@@ -148,6 +166,13 @@ def filter_points(
     return filtered
 
 
+def sample_points(points: list[UMTPoint], sample_step: int) -> list[UMTPoint]:
+    sampled = points[::sample_step]
+    if not sampled:
+        raise ConverterError("No rows remain after applying --sample-step.")
+    return sampled
+
+
 def detect_coordinate_unit(points: list[UMTPoint]) -> str:
     max_lat = max(abs(point.latitude_raw) for point in points)
     max_lon = max(abs(point.longitude_raw) for point in points)
@@ -166,6 +191,11 @@ def detect_coordinate_unit(points: list[UMTPoint]) -> str:
 
     radians_speed = estimate_median_pair_speed(points, "radians")
     degrees_speed = estimate_median_pair_speed(points, "degrees")
+    logging.info(
+        "Coordinate unit check: median speed if radians=%.3f m/s, if degrees=%.3f m/s",
+        radians_speed,
+        degrees_speed,
+    )
 
     radians_plausible = 0.5 <= radians_speed <= 120.0
     degrees_plausible = 0.5 <= degrees_speed <= 120.0
@@ -225,9 +255,13 @@ def normalize_coordinates(latitude: float, longitude: float, unit: str) -> tuple
         longitude = math.degrees(longitude)
 
     if not -90.0 <= latitude <= 90.0:
-        raise ConverterError(f"Latitude out of range after conversion: {latitude}")
+        raise ConverterError(
+            f"Latitude out of range after conversion; expected [-90, 90], got {latitude}."
+        )
     if not -180.0 <= longitude <= 180.0:
-        raise ConverterError(f"Longitude out of range after conversion: {longitude}")
+        raise ConverterError(
+            f"Longitude out of range after conversion; expected [-180, 180], got {longitude}."
+        )
 
     return latitude, longitude
 
@@ -447,6 +481,7 @@ def convert_file(
     start_datetime: datetime | None,
     time_start: float | None,
     time_end: float | None,
+    sample_step: int,
 ) -> None:
     try:
         same_file = input_path.resolve() == output_path.resolve()
@@ -457,20 +492,26 @@ def convert_file(
         raise ConverterError("Input and output paths must be different.")
 
     raw_points = load_umt_points(input_path)
-    logging.info("Loaded %d UMT rows from %s", len(raw_points), input_path)
+    logging.info("Input file: %s", input_path)
+    logging.info("Total rows read: %d", len(raw_points))
 
     filtered_points = filter_points(raw_points, time_start, time_end)
-    logging.info("Keeping %d rows after time filtering", len(filtered_points))
+    logging.info("Rows after filtering: %d", len(filtered_points))
 
-    coordinate_unit = detect_coordinate_unit(filtered_points)
+    sampled_points = sample_points(filtered_points, sample_step)
+    logging.info("Sample step: %d", sample_step)
+    logging.info("Rows written: %d", len(sampled_points))
+
+    coordinate_unit = detect_coordinate_unit(sampled_points)
     logging.info("Detected coordinate unit: %s", coordinate_unit)
 
-    geo_points = convert_points(filtered_points, coordinate_unit)
+    geo_points = convert_points(sampled_points, coordinate_unit)
     start_datetime_utc = resolve_start_datetime(start_datetime)
     logging.info("Using UTC start datetime: %s", start_datetime_utc.isoformat())
 
-    line_count = write_nmea_file(output_path, geo_points, start_datetime_utc)
-    logging.info("Wrote %d NMEA sentences to %s", line_count, output_path)
+    sentence_count = write_nmea_file(output_path, geo_points, start_datetime_utc)
+    logging.info("Number of generated NMEA sentences: %d", sentence_count)
+    logging.info("Output file: %s", output_path)
 
 
 def main() -> int:
@@ -484,6 +525,7 @@ def main() -> int:
             start_datetime=args.start_datetime,
             time_start=args.time_start,
             time_end=args.time_end,
+            sample_step=args.sample_step,
         )
     except ConverterError as exc:
         logging.error("%s", exc)
