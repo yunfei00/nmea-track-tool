@@ -18,6 +18,8 @@ def validate_track_points(
     previous_reference_time: float | None = None
 
     for point in validated_points:
+        point.is_valid = True
+        point.invalid_reason = ""
         point.calculated_speed_kmh = None
 
         time_seconds = _parse_time_seconds(point)

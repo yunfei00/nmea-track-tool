@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -18,6 +18,19 @@ class TrackResult:
     summary: TrackSummary
 
 
+def build_track_from_points(
+    points: Iterable[TrackPoint],
+    *,
+    max_speed_kmh: float = 300.0,
+    split_gap_seconds: float = 10.0,
+) -> TrackResult:
+    point_list = [replace(point) for point in points]
+    points_result = validate_track_points(point_list, max_speed_kmh=max_speed_kmh)
+    segments = split_track_segments(points_result, split_gap_seconds=split_gap_seconds)
+    summary = summarize_track(points_result, segments)
+    return TrackResult(points=points_result, segments=segments, summary=summary)
+
+
 def build_track_from_lines(
     lines: Iterable[str],
     *,
@@ -25,10 +38,11 @@ def build_track_from_lines(
     split_gap_seconds: float = 10.0,
 ) -> TrackResult:
     parsed_points = parse_nmea_lines(lines)
-    points = validate_track_points(parsed_points, max_speed_kmh=max_speed_kmh)
-    segments = split_track_segments(points, split_gap_seconds=split_gap_seconds)
-    summary = summarize_track(points, segments)
-    return TrackResult(points=points, segments=segments, summary=summary)
+    return build_track_from_points(
+        parsed_points,
+        max_speed_kmh=max_speed_kmh,
+        split_gap_seconds=split_gap_seconds,
+    )
 
 
 def build_track_from_file(
@@ -38,7 +52,8 @@ def build_track_from_file(
     split_gap_seconds: float = 10.0,
 ) -> TrackResult:
     parsed_points = parse_nmea_file(path)
-    points = validate_track_points(parsed_points, max_speed_kmh=max_speed_kmh)
-    segments = split_track_segments(points, split_gap_seconds=split_gap_seconds)
-    summary = summarize_track(points, segments)
-    return TrackResult(points=points, segments=segments, summary=summary)
+    return build_track_from_points(
+        parsed_points,
+        max_speed_kmh=max_speed_kmh,
+        split_gap_seconds=split_gap_seconds,
+    )

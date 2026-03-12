@@ -33,6 +33,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _qt_runtime_available() -> bool:
     try:
+        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
         from PySide6.QtWidgets import QApplication  # noqa: F401
     except Exception:
         return False
