@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from core.pipeline import TrackResult, build_track_from_file
 from core.track_model import TrackPoint
 from gui.editing import TrackEditSession, build_window_title
+from gui.exporting import export_cleaned_nmea, export_points_csv, export_summary_json
 from gui.map_view import TrackMapView
 from gui.presentation import SUMMARY_FIELDS, TABLE_COLUMNS, build_summary_rows, track_point_to_row_values
 
@@ -47,6 +48,9 @@ class MainWindow(QMainWindow):
         self._current_file_label = QLabel("No file loaded")
         self._delete_action: QAction | None = None
         self._reset_action: QAction | None = None
+        self._export_nmea_action: QAction | None = None
+        self._export_csv_action: QAction | None = None
+        self._export_json_action: QAction | None = None
 
         self._build_ui()
         self._update_window_state()
@@ -102,18 +106,35 @@ class MainWindow(QMainWindow):
         delete_action.triggered.connect(self.delete_selected_points)
         reset_action = QAction("Reset to Original Data", self)
         reset_action.triggered.connect(self.reset_to_original_data)
+        export_nmea_action = QAction("Export Cleaned NMEA", self)
+        export_nmea_action.triggered.connect(self.export_cleaned_nmea_file)
+        export_csv_action = QAction("Export Points CSV", self)
+        export_csv_action.triggered.connect(self.export_points_csv_file)
+        export_json_action = QAction("Export Summary JSON", self)
+        export_json_action.triggered.connect(self.export_summary_json_file)
         self._delete_action = delete_action
         self._reset_action = reset_action
+        self._export_nmea_action = export_nmea_action
+        self._export_csv_action = export_csv_action
+        self._export_json_action = export_json_action
 
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction(open_action)
         file_menu.addAction(delete_action)
         file_menu.addAction(reset_action)
+        file_menu.addSeparator()
+        file_menu.addAction(export_nmea_action)
+        file_menu.addAction(export_csv_action)
+        file_menu.addAction(export_json_action)
 
         toolbar = QToolBar("Main", self)
         toolbar.addAction(open_action)
         toolbar.addAction(delete_action)
         toolbar.addAction(reset_action)
+        toolbar.addSeparator()
+        toolbar.addAction(export_nmea_action)
+        toolbar.addAction(export_csv_action)
+        toolbar.addAction(export_json_action)
         self.addToolBar(toolbar)
 
     def open_file_dialog(self) -> None:
@@ -160,6 +181,71 @@ class MainWindow(QMainWindow):
         self._apply_track_result(result)
         self.statusBar().showMessage("Reset to original data")
 
+    def export_cleaned_nmea_file(self) -> None:
+        if self._session is None or self._session.current_result is None:
+            return
+
+        output_path = self._get_export_path(
+            "Export Cleaned NMEA",
+            ".nmea",
+            "NMEA Files (*.nmea);;All Files (*)",
+        )
+        if output_path is None:
+            return
+
+        try:
+            line_count = export_cleaned_nmea(self._session.current_result, output_path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Failed", f"Could not export cleaned NMEA:\n{exc}")
+            self.statusBar().showMessage("Failed to export cleaned NMEA")
+            return
+
+        self.statusBar().showMessage(
+            f"Exported cleaned NMEA to {output_path} ({line_count} sentence lines)"
+        )
+
+    def export_points_csv_file(self) -> None:
+        if self._session is None or self._session.current_result is None:
+            return
+
+        output_path = self._get_export_path(
+            "Export Points CSV",
+            ".csv",
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if output_path is None:
+            return
+
+        try:
+            export_points_csv(self._session.current_result, output_path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Failed", f"Could not export points CSV:\n{exc}")
+            self.statusBar().showMessage("Failed to export points CSV")
+            return
+
+        self.statusBar().showMessage(f"Exported points CSV to {output_path}")
+
+    def export_summary_json_file(self) -> None:
+        if self._session is None or self._session.current_result is None:
+            return
+
+        output_path = self._get_export_path(
+            "Export Summary JSON",
+            ".json",
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if output_path is None:
+            return
+
+        try:
+            export_summary_json(self._session.current_result, output_path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Failed", f"Could not export summary JSON:\n{exc}")
+            self.statusBar().showMessage("Failed to export summary JSON")
+            return
+
+        self.statusBar().showMessage(f"Exported summary JSON to {output_path}")
+
     def _populate_summary(self, result: TrackResult) -> None:
         summary_values = dict(build_summary_rows(result.summary))
         for label_text, field_name in SUMMARY_FIELDS:
@@ -191,10 +277,35 @@ class MainWindow(QMainWindow):
         row_indexes = {model_index.row() for model_index in self._table.selectionModel().selectedRows()}
         return sorted(row_indexes)
 
+    def _get_export_path(
+        self,
+        dialog_title: str,
+        default_suffix: str,
+        file_filter: str,
+    ) -> Path | None:
+        suggested_path = self._suggest_export_path(default_suffix)
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            dialog_title,
+            str(suggested_path),
+            file_filter,
+        )
+        if not filename:
+            return None
+        return Path(filename)
+
+    def _suggest_export_path(self, suffix: str) -> Path:
+        if self._session is None or self._session.file_path is None:
+            return Path(f"track_export{suffix}")
+
+        input_path = self._session.file_path
+        return input_path.with_name(f"{input_path.stem}_cleaned{suffix}")
+
     def _update_window_state(self) -> None:
         has_session = self._session is not None
         has_selection = bool(self._selected_row_indexes()) if has_session else False
         is_modified = self._session.is_modified if has_session else False
+        has_result = has_session and self._session.current_result is not None
 
         self.setWindowTitle(
             build_window_title(
@@ -209,3 +320,9 @@ class MainWindow(QMainWindow):
             self._delete_action.setEnabled(has_selection)
         if self._reset_action is not None:
             self._reset_action.setEnabled(has_session and is_modified)
+        if self._export_nmea_action is not None:
+            self._export_nmea_action.setEnabled(has_result)
+        if self._export_csv_action is not None:
+            self._export_csv_action.setEnabled(has_result)
+        if self._export_json_action is not None:
+            self._export_json_action.setEnabled(has_result)
