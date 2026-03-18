@@ -1,3 +1,4 @@
+from core.anomaly import detect_anomalies
 from core.pipeline import (
     TrackResult,
     build_track_from_file,
@@ -7,6 +8,7 @@ from core.pipeline import (
 from core.track_model import TrackPoint, TrackSegment, TrackSummary, time_str_to_seconds
 
 __all__ = [
+    "detect_anomalies",
     "TrackPoint",
     "TrackSegment",
     "TrackSummary",

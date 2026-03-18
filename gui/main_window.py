@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QColor
+from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -45,11 +45,15 @@ class MainWindow(QMainWindow):
         self._table = QTableWidget(0, len(TABLE_COLUMNS))
         self._map_view = TrackMapView()
         self._open_button = QPushButton("Open NMEA File")
+        self._undo_button = QPushButton("Undo")
+        self._redo_button = QPushButton("Redo")
         self._detect_anomalies_button = QPushButton("Detect Anomalies")
         self._remove_anomalies_button = QPushButton("Remove All Anomalies")
         self._delete_button = QPushButton("Delete Selected Points")
         self._reset_button = QPushButton("Reset to Original Data")
         self._current_file_label = QLabel("No file loaded")
+        self._undo_action: QAction | None = None
+        self._redo_action: QAction | None = None
         self._detect_anomalies_action: QAction | None = None
         self._remove_anomalies_action: QAction | None = None
         self._delete_action: QAction | None = None
@@ -69,6 +73,8 @@ class MainWindow(QMainWindow):
 
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(self._open_button)
+        controls_layout.addWidget(self._undo_button)
+        controls_layout.addWidget(self._redo_button)
         controls_layout.addWidget(self._detect_anomalies_button)
         controls_layout.addWidget(self._remove_anomalies_button)
         controls_layout.addWidget(self._delete_button)
@@ -103,6 +109,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
         self._open_button.clicked.connect(self.open_file_dialog)
+        self._undo_button.clicked.connect(self.undo_last_edit)
+        self._redo_button.clicked.connect(self.redo_last_edit)
         self._detect_anomalies_button.clicked.connect(self.detect_anomalies)
         self._remove_anomalies_button.clicked.connect(self.remove_all_anomalies)
         self._delete_button.clicked.connect(self.delete_selected_points)
@@ -112,6 +120,12 @@ class MainWindow(QMainWindow):
     def _build_actions(self) -> None:
         open_action = QAction("Open NMEA File", self)
         open_action.triggered.connect(self.open_file_dialog)
+        undo_action = QAction("Undo", self)
+        undo_action.setShortcut(QKeySequence("Ctrl+Z"))
+        undo_action.triggered.connect(self.undo_last_edit)
+        redo_action = QAction("Redo", self)
+        redo_action.setShortcut(QKeySequence("Ctrl+Y"))
+        redo_action.triggered.connect(self.redo_last_edit)
         detect_anomalies_action = QAction("Detect Anomalies", self)
         detect_anomalies_action.triggered.connect(self.detect_anomalies)
         remove_anomalies_action = QAction("Remove All Anomalies", self)
@@ -126,6 +140,8 @@ class MainWindow(QMainWindow):
         export_csv_action.triggered.connect(self.export_points_csv_file)
         export_json_action = QAction("Export Summary JSON", self)
         export_json_action.triggered.connect(self.export_summary_json_file)
+        self._undo_action = undo_action
+        self._redo_action = redo_action
         self._detect_anomalies_action = detect_anomalies_action
         self._remove_anomalies_action = remove_anomalies_action
         self._delete_action = delete_action
@@ -136,6 +152,8 @@ class MainWindow(QMainWindow):
 
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction(open_action)
+        file_menu.addAction(undo_action)
+        file_menu.addAction(redo_action)
         file_menu.addAction(detect_anomalies_action)
         file_menu.addAction(remove_anomalies_action)
         file_menu.addAction(delete_action)
@@ -147,6 +165,8 @@ class MainWindow(QMainWindow):
 
         toolbar = QToolBar("Main", self)
         toolbar.addAction(open_action)
+        toolbar.addAction(undo_action)
+        toolbar.addAction(redo_action)
         toolbar.addAction(detect_anomalies_action)
         toolbar.addAction(remove_anomalies_action)
         toolbar.addAction(delete_action)
@@ -179,6 +199,24 @@ class MainWindow(QMainWindow):
         self._session = TrackEditSession.from_track_result(result, file_path=input_path)
         self._apply_track_result(result)
         self.statusBar().showMessage(f"Loaded {input_path}")
+
+    def undo_last_edit(self) -> None:
+        if self._session is None or not self._session.can_undo:
+            self.statusBar().showMessage("Nothing to undo")
+            return
+
+        result = self._session.undo()
+        self._apply_track_result(result)
+        self.statusBar().showMessage("Undid last edit")
+
+    def redo_last_edit(self) -> None:
+        if self._session is None or not self._session.can_redo:
+            self.statusBar().showMessage("Nothing to redo")
+            return
+
+        result = self._session.redo()
+        self._apply_track_result(result)
+        self.statusBar().showMessage("Redid last edit")
 
     def detect_anomalies(self) -> None:
         if self._session is None:
@@ -372,6 +410,8 @@ class MainWindow(QMainWindow):
         has_selection = bool(self._selected_row_indexes()) if has_session else False
         is_modified = self._session.is_modified if has_session else False
         has_result = has_session and self._session.current_result is not None
+        can_undo = self._session.can_undo if has_session else False
+        can_redo = self._session.can_redo if has_session else False
         has_anomaly_points = (
             bool(self._session.anomaly_row_indexes())
             if has_session and self._session.current_result is not None
@@ -385,10 +425,16 @@ class MainWindow(QMainWindow):
             )
         )
 
+        self._undo_button.setEnabled(can_undo)
+        self._redo_button.setEnabled(can_redo)
         self._detect_anomalies_button.setEnabled(has_result)
         self._remove_anomalies_button.setEnabled(has_anomaly_points)
         self._delete_button.setEnabled(has_selection)
         self._reset_button.setEnabled(has_session and is_modified)
+        if self._undo_action is not None:
+            self._undo_action.setEnabled(can_undo)
+        if self._redo_action is not None:
+            self._redo_action.setEnabled(can_redo)
         if self._detect_anomalies_action is not None:
             self._detect_anomalies_action.setEnabled(has_result)
         if self._remove_anomalies_action is not None:
