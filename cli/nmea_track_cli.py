@@ -10,6 +10,12 @@ from typing import Sequence
 
 from core.pipeline import TrackResult, build_track_from_file
 
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from nmea_track.analysis import Anomaly, detect_anomalies
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="NMEA track analysis CLI.")
@@ -30,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional path to export TrackSummary as JSON.",
     )
+    analyze_parser.add_argument(
+        "--detect-anomalies",
+        action="store_true",
+        help="Detect time, jump, and speed anomalies from parsed points.",
+    )
     analyze_parser.set_defaults(handler=handle_analyze)
 
     return parser
@@ -49,6 +60,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 def handle_analyze(args: argparse.Namespace) -> int:
     result = build_track_from_file(args.input_file)
     print(format_track_result(result))
+    if args.detect_anomalies:
+        anomalies = detect_anomalies(result.points)
+        print()
+        print(format_anomaly_summary(anomalies))
 
     if args.export_points_csv:
         write_points_csv(result, args.export_points_csv)
@@ -109,6 +124,31 @@ def write_summary_json(result: TrackResult, path: str | Path) -> None:
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         json.dump(asdict(result.summary), handle, indent=2)
         handle.write("\n")
+
+
+def format_anomaly_summary(anomalies: Sequence[Anomaly]) -> str:
+    totals = {
+        "speed": 0,
+        "jump": 0,
+        "time": 0,
+    }
+    for anomaly in anomalies:
+        anomaly_type = getattr(anomaly, "type", "")
+        if anomaly_type.startswith("speed"):
+            totals["speed"] += 1
+        elif anomaly_type.startswith("time"):
+            totals["time"] += 1
+        elif anomaly_type == "jump":
+            totals["jump"] += 1
+
+    lines = [
+        "Anomaly summary:",
+        f"- total: {len(anomalies)}",
+        f"- speed: {totals['speed']}",
+        f"- jump: {totals['jump']}",
+        f"- time: {totals['time']}",
+    ]
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

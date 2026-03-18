@@ -73,6 +73,20 @@ class NMEATrackCLITests(unittest.TestCase):
         self.assertEqual(summary_data["valid_points"], 1)
         self.assertEqual(summary_data["invalid_points"], 1)
 
+    def test_cli_anomaly_summary_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "input.nmea"
+            input_path.write_text(_sample_nmea_text(), encoding="ascii")
+
+            completed = _run_cli(["analyze", str(input_path), "--detect-anomalies"])
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertIn("Anomaly summary:", completed.stdout)
+        self.assertIn("- total:", completed.stdout)
+        self.assertIn("- speed:", completed.stdout)
+        self.assertIn("- jump:", completed.stdout)
+        self.assertIn("- time:", completed.stdout)
+
 
 def _run_cli(arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
