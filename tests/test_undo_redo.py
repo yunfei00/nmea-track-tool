@@ -95,6 +95,32 @@ class UndoRedoTests(unittest.TestCase):
         self.assertEqual(session.anomaly_row_indexes(), [1])
         self.assertIn("high_speed", restored.points[1].anomaly_flags)
 
+    def test_smoothing_operation_supports_undo_and_redo(self) -> None:
+        session = _build_session(
+            [
+                TrackPoint(time_str="000000.00", lat=10.0, lon=20.0, status="A", fix_quality=1),
+                TrackPoint(time_str="000001.00", lat=11.0, lon=21.0, status="A", fix_quality=1),
+                TrackPoint(time_str="000002.00", lat=15.0, lon=25.0, status="A", fix_quality=1),
+            ]
+        )
+
+        smoothed = session.apply_smoothing()
+
+        self.assertTrue(session.can_undo)
+        self.assertTrue(session.has_smoothed_points)
+        self.assertIsNotNone(smoothed.points[1].smoothed_lat)
+
+        undone = session.undo()
+
+        self.assertIsNone(undone.points[1].smoothed_lat)
+        self.assertFalse(session.has_smoothed_points)
+        self.assertTrue(session.can_redo)
+
+        redone = session.redo()
+
+        self.assertIsNotNone(redone.points[1].smoothed_lat)
+        self.assertTrue(session.has_smoothed_points)
+
     def test_reset_operation_supports_undo_and_redo(self) -> None:
         session = _build_session(
             [

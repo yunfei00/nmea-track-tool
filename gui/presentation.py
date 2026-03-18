@@ -45,11 +45,17 @@ def build_summary_rows(summary: TrackSummary) -> list[tuple[str, str]]:
     ]
 
 
-def track_point_to_row_values(point: TrackPoint) -> list[str]:
+def track_point_to_row_values(
+    point: TrackPoint,
+    *,
+    use_smoothed_coordinates: bool = False,
+) -> list[str]:
+    lat, lon = point.coordinates(use_smoothed=use_smoothed_coordinates)
+
     return [
         point.time_str,
-        format_value(point.lat, decimals=6),
-        format_value(point.lon, decimals=6),
+        format_value(lat, decimals=6),
+        format_value(lon, decimals=6),
         format_value(point.alt_m, decimals=1),
         format_value(point.speed_knots, decimals=2),
         format_value(point.course_deg, decimals=2),
@@ -70,7 +76,11 @@ def format_value(value: object, decimals: int | None = None) -> str:
     return str(value)
 
 
-def build_map_payload(result: TrackResult | None) -> dict[str, object]:
+def build_map_payload(
+    result: TrackResult | None,
+    *,
+    use_smoothed_coordinates: bool = False,
+) -> dict[str, object]:
     if result is None:
         return {
             "polylines": [],
@@ -87,16 +97,17 @@ def build_map_payload(result: TrackResult | None) -> dict[str, object]:
     for segment in result.segments:
         segment_line: list[list[float]] = []
         for point in segment.points:
-            if point.lat is None or point.lon is None:
+            lat, lon = point.coordinates(use_smoothed=use_smoothed_coordinates)
+            if lat is None or lon is None:
                 continue
 
-            coordinate = [point.lat, point.lon]
+            coordinate = [lat, lon]
 
             if point.is_valid:
                 segment_line.append(coordinate)
                 marker = {
-                    "lat": point.lat,
-                    "lon": point.lon,
+                    "lat": lat,
+                    "lon": lon,
                     "time_str": point.time_str,
                 }
                 if start_point is None:
@@ -105,8 +116,8 @@ def build_map_payload(result: TrackResult | None) -> dict[str, object]:
             else:
                 invalid_points.append(
                     {
-                        "lat": point.lat,
-                        "lon": point.lon,
+                        "lat": lat,
+                        "lon": lon,
                         "time_str": point.time_str,
                         "reason": point.invalid_reason,
                     }
@@ -119,17 +130,19 @@ def build_map_payload(result: TrackResult | None) -> dict[str, object]:
         valid_points = [
             point
             for point in result.points
-            if point.is_valid and point.lat is not None and point.lon is not None
+            if point.is_valid and point.coordinates(use_smoothed=use_smoothed_coordinates) != (None, None)
         ]
         if valid_points:
+            start_lat, start_lon = valid_points[0].coordinates(use_smoothed=use_smoothed_coordinates)
+            end_lat, end_lon = valid_points[-1].coordinates(use_smoothed=use_smoothed_coordinates)
             start_point = {
-                "lat": valid_points[0].lat,
-                "lon": valid_points[0].lon,
+                "lat": start_lat,
+                "lon": start_lon,
                 "time_str": valid_points[0].time_str,
             }
             end_point = {
-                "lat": valid_points[-1].lat,
-                "lon": valid_points[-1].lon,
+                "lat": end_lat,
+                "lon": end_lon,
                 "time_str": valid_points[-1].time_str,
             }
 
@@ -141,8 +154,12 @@ def build_map_payload(result: TrackResult | None) -> dict[str, object]:
     }
 
 
-def build_map_html(result: TrackResult | None) -> str:
-    payload = build_map_payload(result)
+def build_map_html(
+    result: TrackResult | None,
+    *,
+    use_smoothed_coordinates: bool = False,
+) -> str:
+    payload = build_map_payload(result, use_smoothed_coordinates=use_smoothed_coordinates)
     payload_json = json.dumps(payload, separators=(",", ":"))
 
     return f"""<!DOCTYPE html>

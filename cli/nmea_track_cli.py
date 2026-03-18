@@ -80,7 +80,7 @@ def format_track_result(result: TrackResult) -> str:
 def write_points_csv(result: TrackResult, path: str | Path) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = list(asdict(result.points[0]).keys()) if result.points else [
+    fieldnames = [
         "time_str",
         "lat",
         "lon",
@@ -93,14 +93,19 @@ def write_points_csv(result: TrackResult, path: str | Path) -> None:
         "status",
         "is_valid",
         "invalid_reason",
+        "anomaly_flags",
         "calculated_speed_kmh",
+        "smoothed_lat",
+        "smoothed_lon",
     ]
 
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for point in result.points:
-            writer.writerow(asdict(point))
+            row = asdict(point)
+            row["anomaly_flags"] = "; ".join(point.anomaly_flags)
+            writer.writerow(row)
 
 
 def write_summary_json(result: TrackResult, path: str | Path) -> None:

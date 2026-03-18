@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.pipeline import TrackResult, build_track_from_file
+from core.smoothing import DEFAULT_SMOOTHING_WINDOW
 from core.track_model import TrackPoint
 from gui.editing import TrackEditSession, build_window_title
 from gui.exporting import export_cleaned_nmea, export_points_csv, export_summary_json
@@ -47,6 +49,8 @@ class MainWindow(QMainWindow):
         self._open_button = QPushButton("Open NMEA File")
         self._undo_button = QPushButton("Undo")
         self._redo_button = QPushButton("Redo")
+        self._apply_smoothing_button = QPushButton("Apply Smoothing")
+        self._smoothed_view_toggle = QCheckBox("Show Smoothed View")
         self._detect_anomalies_button = QPushButton("Detect Anomalies")
         self._remove_anomalies_button = QPushButton("Remove All Anomalies")
         self._delete_button = QPushButton("Delete Selected Points")
@@ -54,6 +58,7 @@ class MainWindow(QMainWindow):
         self._current_file_label = QLabel("No file loaded")
         self._undo_action: QAction | None = None
         self._redo_action: QAction | None = None
+        self._apply_smoothing_action: QAction | None = None
         self._detect_anomalies_action: QAction | None = None
         self._remove_anomalies_action: QAction | None = None
         self._delete_action: QAction | None = None
@@ -75,6 +80,8 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self._open_button)
         controls_layout.addWidget(self._undo_button)
         controls_layout.addWidget(self._redo_button)
+        controls_layout.addWidget(self._apply_smoothing_button)
+        controls_layout.addWidget(self._smoothed_view_toggle)
         controls_layout.addWidget(self._detect_anomalies_button)
         controls_layout.addWidget(self._remove_anomalies_button)
         controls_layout.addWidget(self._delete_button)
@@ -111,6 +118,8 @@ class MainWindow(QMainWindow):
         self._open_button.clicked.connect(self.open_file_dialog)
         self._undo_button.clicked.connect(self.undo_last_edit)
         self._redo_button.clicked.connect(self.redo_last_edit)
+        self._apply_smoothing_button.clicked.connect(self.apply_smoothing)
+        self._smoothed_view_toggle.toggled.connect(self.set_smoothed_view_enabled)
         self._detect_anomalies_button.clicked.connect(self.detect_anomalies)
         self._remove_anomalies_button.clicked.connect(self.remove_all_anomalies)
         self._delete_button.clicked.connect(self.delete_selected_points)
@@ -126,6 +135,8 @@ class MainWindow(QMainWindow):
         redo_action = QAction("Redo", self)
         redo_action.setShortcut(QKeySequence("Ctrl+Y"))
         redo_action.triggered.connect(self.redo_last_edit)
+        apply_smoothing_action = QAction("Apply Smoothing", self)
+        apply_smoothing_action.triggered.connect(self.apply_smoothing)
         detect_anomalies_action = QAction("Detect Anomalies", self)
         detect_anomalies_action.triggered.connect(self.detect_anomalies)
         remove_anomalies_action = QAction("Remove All Anomalies", self)
@@ -142,6 +153,7 @@ class MainWindow(QMainWindow):
         export_json_action.triggered.connect(self.export_summary_json_file)
         self._undo_action = undo_action
         self._redo_action = redo_action
+        self._apply_smoothing_action = apply_smoothing_action
         self._detect_anomalies_action = detect_anomalies_action
         self._remove_anomalies_action = remove_anomalies_action
         self._delete_action = delete_action
@@ -154,6 +166,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_action)
         file_menu.addAction(undo_action)
         file_menu.addAction(redo_action)
+        file_menu.addAction(apply_smoothing_action)
         file_menu.addAction(detect_anomalies_action)
         file_menu.addAction(remove_anomalies_action)
         file_menu.addAction(delete_action)
@@ -167,6 +180,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(open_action)
         toolbar.addAction(undo_action)
         toolbar.addAction(redo_action)
+        toolbar.addAction(apply_smoothing_action)
         toolbar.addAction(detect_anomalies_action)
         toolbar.addAction(remove_anomalies_action)
         toolbar.addAction(delete_action)
@@ -217,6 +231,28 @@ class MainWindow(QMainWindow):
         result = self._session.redo()
         self._apply_track_result(result)
         self.statusBar().showMessage("Redid last edit")
+
+    def apply_smoothing(self) -> None:
+        if self._session is None:
+            return
+
+        result = self._session.apply_smoothing(DEFAULT_SMOOTHING_WINDOW)
+        self._apply_track_result(result)
+        self.statusBar().showMessage(
+            f"Applied smoothing with moving average window {DEFAULT_SMOOTHING_WINDOW}"
+        )
+
+    def set_smoothed_view_enabled(self, enabled: bool) -> None:
+        if self._session is None or self._session.current_result is None:
+            return
+
+        self._session.set_use_smoothed_view(enabled)
+        self._apply_track_result(self._session.current_result)
+        if self._session.use_smoothed_view:
+            self.statusBar().showMessage("Showing smoothed coordinates")
+            return
+
+        self.statusBar().showMessage("Showing raw coordinates")
 
     def detect_anomalies(self) -> None:
         if self._session is None:
@@ -338,9 +374,17 @@ class MainWindow(QMainWindow):
     def _populate_table(self, points: list[TrackPoint]) -> None:
         self._table.clearContents()
         self._table.setRowCount(len(points))
+        use_smoothed_coordinates = (
+            self._session.use_smoothed_view
+            if self._session is not None
+            else False
+        )
 
         for row_index, point in enumerate(points):
-            row_values = track_point_to_row_values(point)
+            row_values = track_point_to_row_values(
+                point,
+                use_smoothed_coordinates=use_smoothed_coordinates,
+            )
             row_color = self._row_background_color(point)
             row_tooltip = self._row_tooltip(point)
             for column_index, value in enumerate(row_values):
@@ -356,7 +400,14 @@ class MainWindow(QMainWindow):
             self._current_file_label.setText(str(self._session.file_path))
         self._populate_summary(result)
         self._populate_table(result.points)
-        self._map_view.set_track_result(result)
+        self._map_view.set_track_result(
+            result,
+            use_smoothed_coordinates=(
+                self._session.use_smoothed_view
+                if self._session is not None
+                else False
+            ),
+        )
         self._update_window_state()
 
     def _selected_row_indexes(self) -> list[int]:
@@ -412,6 +463,7 @@ class MainWindow(QMainWindow):
         has_result = has_session and self._session.current_result is not None
         can_undo = self._session.can_undo if has_session else False
         can_redo = self._session.can_redo if has_session else False
+        has_smoothed_points = self._session.has_smoothed_points if has_session else False
         has_anomaly_points = (
             bool(self._session.anomaly_row_indexes())
             if has_session and self._session.current_result is not None
@@ -427,6 +479,13 @@ class MainWindow(QMainWindow):
 
         self._undo_button.setEnabled(can_undo)
         self._redo_button.setEnabled(can_redo)
+        self._apply_smoothing_button.setEnabled(has_result)
+        self._smoothed_view_toggle.setEnabled(has_smoothed_points)
+        self._smoothed_view_toggle.blockSignals(True)
+        self._smoothed_view_toggle.setChecked(
+            self._session.use_smoothed_view if has_session else False
+        )
+        self._smoothed_view_toggle.blockSignals(False)
         self._detect_anomalies_button.setEnabled(has_result)
         self._remove_anomalies_button.setEnabled(has_anomaly_points)
         self._delete_button.setEnabled(has_selection)
@@ -435,6 +494,8 @@ class MainWindow(QMainWindow):
             self._undo_action.setEnabled(can_undo)
         if self._redo_action is not None:
             self._redo_action.setEnabled(can_redo)
+        if self._apply_smoothing_action is not None:
+            self._apply_smoothing_action.setEnabled(has_result)
         if self._detect_anomalies_action is not None:
             self._detect_anomalies_action.setEnabled(has_result)
         if self._remove_anomalies_action is not None:

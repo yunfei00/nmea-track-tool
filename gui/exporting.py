@@ -23,6 +23,8 @@ POINT_CSV_FIELDNAMES = [
     "invalid_reason",
     "anomaly_flags",
     "calculated_speed_kmh",
+    "smoothed_lat",
+    "smoothed_lon",
 ]
 
 

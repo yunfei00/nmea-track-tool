@@ -6,7 +6,8 @@ from typing import Callable, Iterable
 
 from core.anomaly import detect_anomalies as detect_track_anomalies
 from core.pipeline import TrackResult, build_track_from_points
-from core.track_model import TrackPoint, TrackSegment, clone_track_point
+from core.smoothing import DEFAULT_SMOOTHING_WINDOW, apply_moving_average
+from core.track_model import TrackPoint, TrackSegment, clone_track_point, track_point_raw_signature
 
 RecomputeTrackFn = Callable[..., TrackResult]
 DEFAULT_HISTORY_LIMIT = 20
@@ -36,6 +37,8 @@ def build_window_title(file_path: str | Path | None, modified: bool) -> str:
 class _SessionSnapshot:
     working_points: list[TrackPoint]
     current_result: TrackResult | None
+    smoothing_window: int | None
+    use_smoothed_view: bool
 
 
 @dataclass
@@ -46,6 +49,8 @@ class TrackEditSession:
     max_speed_kmh: float = 300.0
     split_gap_seconds: float = 10.0
     current_result: TrackResult | None = None
+    smoothing_window: int | None = None
+    use_smoothed_view: bool = False
     history_limit: int = DEFAULT_HISTORY_LIMIT
     undo_stack: list[_SessionSnapshot] = field(default_factory=list)
     redo_stack: list[_SessionSnapshot] = field(default_factory=list)
@@ -74,7 +79,13 @@ class TrackEditSession:
 
     @property
     def is_modified(self) -> bool:
-        return self.working_points != self.original_points
+        if len(self.working_points) != len(self.original_points):
+            return True
+
+        return any(
+            track_point_raw_signature(working_point) != track_point_raw_signature(original_point)
+            for working_point, original_point in zip(self.working_points, self.original_points)
+        )
 
     @property
     def can_undo(self) -> bool:
@@ -83,6 +94,12 @@ class TrackEditSession:
     @property
     def can_redo(self) -> bool:
         return bool(self.redo_stack)
+
+    @property
+    def has_smoothed_points(self) -> bool:
+        return self.current_result is not None and any(
+            point.has_smoothed_coordinates for point in self.current_result.points
+        )
 
     def delete_rows(
         self,
@@ -120,6 +137,29 @@ class TrackEditSession:
 
         detect_track_anomalies(self.current_result.points)
         return self.current_result
+
+    def apply_smoothing(
+        self,
+        window_size: int = DEFAULT_SMOOTHING_WINDOW,
+    ) -> TrackResult:
+        if self.current_result is None:
+            self.recompute()
+            if self.current_result is None:
+                raise ValueError("Cannot apply smoothing without a track result.")
+
+        if self.smoothing_window == window_size and self.has_smoothed_points:
+            self.use_smoothed_view = True
+            return self.current_result
+
+        self._push_undo_snapshot()
+        self.smoothing_window = window_size
+        apply_moving_average(self.current_result.points, window_size)
+        self.use_smoothed_view = True
+        self._sync_smoothed_view()
+        return self.current_result
+
+    def set_use_smoothed_view(self, enabled: bool) -> None:
+        self.use_smoothed_view = bool(enabled) and self.has_smoothed_points
 
     def anomaly_row_indexes(self) -> list[int]:
         if self.current_result is None:
@@ -182,7 +222,9 @@ class TrackEditSession:
             max_speed_kmh=self.max_speed_kmh,
             split_gap_seconds=self.split_gap_seconds,
         )
-        self.working_points = clone_track_points(self.current_result.points)
+        if self.smoothing_window is not None:
+            apply_moving_average(self.current_result.points, self.smoothing_window)
+        self._sync_smoothed_view()
         return self.current_result
 
     def _push_undo_snapshot(self) -> None:
@@ -193,11 +235,16 @@ class TrackEditSession:
         return _SessionSnapshot(
             working_points=clone_track_points(self.working_points),
             current_result=clone_track_result(self.current_result),
+            smoothing_window=self.smoothing_window,
+            use_smoothed_view=self.use_smoothed_view,
         )
 
     def _restore_snapshot(self, snapshot: _SessionSnapshot) -> None:
         self.working_points = clone_track_points(snapshot.working_points)
         self.current_result = clone_track_result(snapshot.current_result)
+        self.smoothing_window = snapshot.smoothing_window
+        self.use_smoothed_view = snapshot.use_smoothed_view
+        self._sync_smoothed_view()
 
     def _push_snapshot(
         self,
@@ -207,6 +254,10 @@ class TrackEditSession:
         stack.append(snapshot)
         if len(stack) > self.history_limit:
             del stack[0]
+
+    def _sync_smoothed_view(self) -> None:
+        if not self.has_smoothed_points:
+            self.use_smoothed_view = False
 
 
 def clone_track_result(result: TrackResult | None) -> TrackResult | None:

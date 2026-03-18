@@ -8,6 +8,8 @@ class TrackPoint:
     time_str: str
     lat: float | None = None
     lon: float | None = None
+    smoothed_lat: float | None = None
+    smoothed_lon: float | None = None
     alt_m: float | None = None
     speed_knots: float | None = None
     course_deg: float | None = None
@@ -56,6 +58,23 @@ class TrackPoint:
     def clear_anomaly_flags(self) -> None:
         self.anomaly_flags = []
 
+    @property
+    def has_smoothed_coordinates(self) -> bool:
+        return self.smoothed_lat is not None and self.smoothed_lon is not None
+
+    def clear_smoothed_coordinates(self) -> None:
+        self.smoothed_lat = None
+        self.smoothed_lon = None
+
+    def coordinates(
+        self,
+        *,
+        use_smoothed: bool = False,
+    ) -> tuple[float | None, float | None]:
+        if use_smoothed and self.has_smoothed_coordinates:
+            return self.smoothed_lat, self.smoothed_lon
+        return self.lat, self.lon
+
 
 @dataclass(slots=True)
 class TrackSegment:
@@ -80,6 +99,21 @@ class TrackSummary:
 
 def clone_track_point(point: TrackPoint) -> TrackPoint:
     return replace(point, anomaly_flags=list(point.anomaly_flags))
+
+
+def track_point_raw_signature(point: TrackPoint) -> tuple[object, ...]:
+    return (
+        point.time_str,
+        point.lat,
+        point.lon,
+        point.alt_m,
+        point.speed_knots,
+        point.course_deg,
+        point.fix_quality,
+        point.num_sats,
+        point.hdop,
+        point.status,
+    )
 
 
 def time_str_to_seconds(time_str: str) -> float:

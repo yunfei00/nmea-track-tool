@@ -11,5 +11,15 @@ class TrackMapView(QWebEngineView):
         super().__init__(parent)
         self.setHtml(build_map_html(None))
 
-    def set_track_result(self, result: TrackResult | None) -> None:
-        self.setHtml(build_map_html(result))
+    def set_track_result(
+        self,
+        result: TrackResult | None,
+        *,
+        use_smoothed_coordinates: bool = False,
+    ) -> None:
+        self.setHtml(
+            build_map_html(
+                result,
+                use_smoothed_coordinates=use_smoothed_coordinates,
+            )
+        )

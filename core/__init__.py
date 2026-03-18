@@ -5,10 +5,12 @@ from core.pipeline import (
     build_track_from_lines,
     build_track_from_points,
 )
+from core.smoothing import apply_moving_average
 from core.track_model import TrackPoint, TrackSegment, TrackSummary, time_str_to_seconds
 
 __all__ = [
     "detect_anomalies",
+    "apply_moving_average",
     "TrackPoint",
     "TrackSegment",
     "TrackSummary",
