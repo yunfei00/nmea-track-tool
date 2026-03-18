@@ -51,11 +51,13 @@ class MainWindow(QMainWindow):
         self._redo_button = QPushButton("Redo")
         self._apply_smoothing_button = QPushButton("Apply Smoothing")
         self._smoothed_view_toggle = QCheckBox("Show Smoothed View")
+        self._color_by_speed_toggle = QCheckBox("Color by Speed")
         self._detect_anomalies_button = QPushButton("Detect Anomalies")
         self._remove_anomalies_button = QPushButton("Remove All Anomalies")
         self._delete_button = QPushButton("Delete Selected Points")
         self._reset_button = QPushButton("Reset to Original Data")
         self._current_file_label = QLabel("No file loaded")
+        self._color_by_speed_enabled = False
         self._undo_action: QAction | None = None
         self._redo_action: QAction | None = None
         self._apply_smoothing_action: QAction | None = None
@@ -82,6 +84,7 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self._redo_button)
         controls_layout.addWidget(self._apply_smoothing_button)
         controls_layout.addWidget(self._smoothed_view_toggle)
+        controls_layout.addWidget(self._color_by_speed_toggle)
         controls_layout.addWidget(self._detect_anomalies_button)
         controls_layout.addWidget(self._remove_anomalies_button)
         controls_layout.addWidget(self._delete_button)
@@ -120,6 +123,7 @@ class MainWindow(QMainWindow):
         self._redo_button.clicked.connect(self.redo_last_edit)
         self._apply_smoothing_button.clicked.connect(self.apply_smoothing)
         self._smoothed_view_toggle.toggled.connect(self.set_smoothed_view_enabled)
+        self._color_by_speed_toggle.toggled.connect(self.set_color_by_speed_enabled)
         self._detect_anomalies_button.clicked.connect(self.detect_anomalies)
         self._remove_anomalies_button.clicked.connect(self.remove_all_anomalies)
         self._delete_button.clicked.connect(self.delete_selected_points)
@@ -253,6 +257,19 @@ class MainWindow(QMainWindow):
             return
 
         self.statusBar().showMessage("Showing raw coordinates")
+
+    def set_color_by_speed_enabled(self, enabled: bool) -> None:
+        self._color_by_speed_enabled = bool(enabled)
+
+        if self._session is None or self._session.current_result is None:
+            return
+
+        self._apply_track_result(self._session.current_result)
+        if self._color_by_speed_enabled:
+            self.statusBar().showMessage("Color by speed enabled")
+            return
+
+        self.statusBar().showMessage("Color by speed disabled")
 
     def detect_anomalies(self) -> None:
         if self._session is None:
@@ -407,6 +424,7 @@ class MainWindow(QMainWindow):
                 if self._session is not None
                 else False
             ),
+            color_by_speed=self._color_by_speed_enabled,
         )
         self._update_window_state()
 
@@ -486,6 +504,10 @@ class MainWindow(QMainWindow):
             self._session.use_smoothed_view if has_session else False
         )
         self._smoothed_view_toggle.blockSignals(False)
+        self._color_by_speed_toggle.setEnabled(has_result)
+        self._color_by_speed_toggle.blockSignals(True)
+        self._color_by_speed_toggle.setChecked(self._color_by_speed_enabled)
+        self._color_by_speed_toggle.blockSignals(False)
         self._detect_anomalies_button.setEnabled(has_result)
         self._remove_anomalies_button.setEnabled(has_anomaly_points)
         self._delete_button.setEnabled(has_selection)

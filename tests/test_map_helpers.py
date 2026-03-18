@@ -86,6 +86,45 @@ class MapHelperTests(unittest.TestCase):
         self.assertIn("End", html)
         self.assertIn('"polylines":[[[1.0,2.0],[3.0,4.0]]]', html)
 
+    def test_build_map_payload_can_color_track_by_speed_and_include_anomaly_points(self) -> None:
+        points = [
+            TrackPoint(time_str="000000.00", lat=0.0, lon=0.0, is_valid=True),
+            TrackPoint(time_str="000010.00", lat=0.0, lon=0.001, is_valid=True, calculated_speed_kmh=40.0),
+            TrackPoint(
+                time_str="000011.00",
+                lat=0.0,
+                lon=0.003,
+                is_valid=True,
+                calculated_speed_kmh=800.0,
+                anomaly_flags=["high_speed", "jump"],
+            ),
+        ]
+        result = TrackResult(
+            points=points,
+            segments=[TrackSegment(points=points)],
+            summary=TrackSummary(
+                total_points=3,
+                valid_points=3,
+                invalid_points=0,
+                segment_count=1,
+                total_distance_m=0.0,
+                duration_seconds=11.0,
+                max_speed_kmh=800.0,
+                avg_speed_kmh=100.0,
+            ),
+        )
+
+        payload = build_map_payload(result, color_by_speed=True)
+
+        self.assertTrue(payload["color_by_speed"])
+        self.assertEqual(len(payload["speed_polylines"]), 2)
+        self.assertNotEqual(
+            payload["speed_polylines"][0]["color"],
+            payload["speed_polylines"][1]["color"],
+        )
+        self.assertEqual(len(payload["anomaly_points"]), 1)
+        self.assertEqual(payload["anomaly_points"][0]["reason"], "high_speed; jump")
+
 
 if __name__ == "__main__":
     unittest.main()

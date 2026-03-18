@@ -16,10 +16,12 @@ class TrackMapView(QWebEngineView):
         result: TrackResult | None,
         *,
         use_smoothed_coordinates: bool = False,
+        color_by_speed: bool = False,
     ) -> None:
         self.setHtml(
             build_map_html(
                 result,
                 use_smoothed_coordinates=use_smoothed_coordinates,
+                color_by_speed=color_by_speed,
             )
         )
