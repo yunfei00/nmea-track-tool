@@ -42,6 +42,7 @@ class GUIHelperTests(unittest.TestCase):
             hdop=0.9,
             is_valid=False,
             invalid_reason="jump point",
+            anomaly_flags=["high_speed", "jump"],
         )
 
         row = track_point_to_row_values(point)
@@ -57,6 +58,7 @@ class GUIHelperTests(unittest.TestCase):
         self.assertEqual(row[8], "0.9")
         self.assertEqual(row[9], "False")
         self.assertEqual(row[10], "jump point")
+        self.assertEqual(row[11], "high_speed; jump")
 
 
 if __name__ == "__main__":

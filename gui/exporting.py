@@ -21,6 +21,7 @@ POINT_CSV_FIELDNAMES = [
     "status",
     "is_valid",
     "invalid_reason",
+    "anomaly_flags",
     "calculated_speed_kmh",
 ]
 
@@ -38,7 +39,9 @@ def export_points_csv(result: TrackResult, path: str | Path) -> None:
         writer = csv.DictWriter(handle, fieldnames=POINT_CSV_FIELDNAMES)
         writer.writeheader()
         for point in result.points:
-            writer.writerow(asdict(point))
+            row = asdict(point)
+            row["anomaly_flags"] = "; ".join(point.anomaly_flags)
+            writer.writerow(row)
 
 
 def export_summary_json(result: TrackResult, path: str | Path) -> None:

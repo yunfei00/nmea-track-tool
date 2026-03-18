@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 
 @dataclass(slots=True)
@@ -18,6 +18,7 @@ class TrackPoint:
     is_valid: bool = True
     invalid_reason: str = ""
     calculated_speed_kmh: float | None = None
+    anomaly_flags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.time_str:
@@ -28,6 +29,8 @@ class TrackPoint:
 
         if self.invalid_reason:
             self.is_valid = False
+
+        self.anomaly_flags = _normalize_text_flags(self.anomaly_flags)
 
     def set_invalid(self, reason: str) -> None:
         clean_reason = reason.strip()
@@ -46,6 +49,12 @@ class TrackPoint:
         }
         if clean_reason.lower() not in existing_reasons:
             self.invalid_reason = f"{self.invalid_reason}; {clean_reason}"
+
+    def add_anomaly_flag(self, flag: str) -> None:
+        self.anomaly_flags = _normalize_text_flags([*self.anomaly_flags, flag])
+
+    def clear_anomaly_flags(self) -> None:
+        self.anomaly_flags = []
 
 
 @dataclass(slots=True)
@@ -69,6 +78,10 @@ class TrackSummary:
     avg_speed_kmh: float
 
 
+def clone_track_point(point: TrackPoint) -> TrackPoint:
+    return replace(point, anomaly_flags=list(point.anomaly_flags))
+
+
 def time_str_to_seconds(time_str: str) -> float:
     if not time_str:
         raise ValueError("time_str must not be empty.")
@@ -90,3 +103,22 @@ def time_str_to_seconds(time_str: str) -> float:
         raise ValueError(f"Invalid second value in time_str: {time_str}")
 
     return hours * 3600.0 + minutes * 60.0 + seconds + fractional_seconds
+
+
+def _normalize_text_flags(flags: list[str]) -> list[str]:
+    normalized_flags: list[str] = []
+    seen_flags: set[str] = set()
+
+    for flag in flags:
+        clean_flag = str(flag).strip()
+        if not clean_flag:
+            continue
+
+        normalized_key = clean_flag.lower()
+        if normalized_key in seen_flags:
+            continue
+
+        seen_flags.add(normalized_key)
+        normalized_flags.append(clean_flag)
+
+    return normalized_flags

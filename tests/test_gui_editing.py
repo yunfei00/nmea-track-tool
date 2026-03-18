@@ -78,6 +78,42 @@ class GUIEditingTests(unittest.TestCase):
         self.assertEqual(recomputed.summary.total_points, 1)
         self.assertTrue(session.is_modified)
 
+    def test_detect_anomalies_marks_current_result_without_modifying_working_points(self) -> None:
+        result = build_track_from_points(
+            [
+                TrackPoint(time_str="000000.00", lat=0.0, lon=0.0, status="A", fix_quality=1),
+                TrackPoint(time_str="000001.00", lat=0.0, lon=0.001, status="A", fix_quality=1),
+            ],
+            max_speed_kmh=1000.0,
+        )
+        session = TrackEditSession.from_track_result(result, file_path="sample.nmea")
+
+        detected = session.detect_anomalies()
+
+        self.assertEqual(session.anomaly_row_indexes(), [1])
+        self.assertIn("high_speed", detected.points[1].anomaly_flags)
+        self.assertEqual(session.working_points[1].anomaly_flags, [])
+        self.assertFalse(session.is_modified)
+
+    def test_remove_all_anomalies_recomputes_after_flagged_points_are_removed(self) -> None:
+        result = build_track_from_points(
+            [
+                TrackPoint(time_str="000000.00", lat=0.0, lon=0.0, status="A", fix_quality=1),
+                TrackPoint(time_str="000001.00", lat=0.0, lon=0.001, status="A", fix_quality=1),
+                TrackPoint(time_str="000011.00", lat=0.0, lon=0.0011, status="A", fix_quality=1),
+            ],
+            max_speed_kmh=1000.0,
+        )
+        session = TrackEditSession.from_track_result(result, file_path="sample.nmea")
+        session.detect_anomalies()
+
+        updated = session.remove_all_anomalies()
+
+        self.assertEqual(updated.summary.total_points, 2)
+        self.assertEqual(len(session.working_points), 2)
+        self.assertEqual(session.anomaly_row_indexes(), [])
+        self.assertTrue(session.is_modified)
+
     def test_build_window_title_shows_modified_state(self) -> None:
         self.assertEqual(build_window_title(None, False), "NMEA Track Viewer")
         self.assertEqual(

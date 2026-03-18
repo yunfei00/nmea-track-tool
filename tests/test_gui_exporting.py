@@ -25,6 +25,7 @@ class GUIExportingTests(unittest.TestCase):
             csv_text = output_path.read_text(encoding="utf-8")
 
         self.assertIn("time_str,lat,lon,alt_m", csv_text)
+        self.assertIn("anomaly_flags", csv_text)
         self.assertIn("000000.00", csv_text)
         self.assertIn("000001.00", csv_text)
 

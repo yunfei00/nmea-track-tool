@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Iterable
 
 from core.geo import calc_speed_kmh, haversine_m
-from core.track_model import TrackPoint, time_str_to_seconds
+from core.track_model import TrackPoint, clone_track_point, time_str_to_seconds
 
 VALID_FIX_QUALITIES = {1, 2, 3, 4, 5, 6, 7, 8}
 
@@ -13,7 +12,7 @@ def validate_track_points(
     points: Iterable[TrackPoint],
     max_speed_kmh: float = 300.0,
 ) -> list[TrackPoint]:
-    validated_points = [replace(point) for point in points]
+    validated_points = [clone_track_point(point) for point in points]
     previous_reference_point: TrackPoint | None = None
     previous_reference_time: float | None = None
 
@@ -21,6 +20,7 @@ def validate_track_points(
         point.is_valid = True
         point.invalid_reason = ""
         point.calculated_speed_kmh = None
+        point.clear_anomaly_flags()
 
         time_seconds = _parse_time_seconds(point)
         _apply_field_validations(point)

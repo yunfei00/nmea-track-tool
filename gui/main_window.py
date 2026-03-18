@@ -31,6 +31,8 @@ from gui.map_view import TrackMapView
 from gui.presentation import SUMMARY_FIELDS, TABLE_COLUMNS, build_summary_rows, track_point_to_row_values
 
 INVALID_ROW_COLOR = QColor(255, 235, 238)
+ANOMALY_ROW_COLOR = QColor(255, 205, 210)
+INVALID_ANOMALY_ROW_COLOR = QColor(239, 154, 154)
 
 
 class MainWindow(QMainWindow):
@@ -43,9 +45,13 @@ class MainWindow(QMainWindow):
         self._table = QTableWidget(0, len(TABLE_COLUMNS))
         self._map_view = TrackMapView()
         self._open_button = QPushButton("Open NMEA File")
+        self._detect_anomalies_button = QPushButton("Detect Anomalies")
+        self._remove_anomalies_button = QPushButton("Remove All Anomalies")
         self._delete_button = QPushButton("Delete Selected Points")
         self._reset_button = QPushButton("Reset to Original Data")
         self._current_file_label = QLabel("No file loaded")
+        self._detect_anomalies_action: QAction | None = None
+        self._remove_anomalies_action: QAction | None = None
         self._delete_action: QAction | None = None
         self._reset_action: QAction | None = None
         self._export_nmea_action: QAction | None = None
@@ -63,6 +69,8 @@ class MainWindow(QMainWindow):
 
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(self._open_button)
+        controls_layout.addWidget(self._detect_anomalies_button)
+        controls_layout.addWidget(self._remove_anomalies_button)
         controls_layout.addWidget(self._delete_button)
         controls_layout.addWidget(self._reset_button)
         controls_layout.addWidget(self._current_file_label, stretch=1)
@@ -95,6 +103,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
         self._open_button.clicked.connect(self.open_file_dialog)
+        self._detect_anomalies_button.clicked.connect(self.detect_anomalies)
+        self._remove_anomalies_button.clicked.connect(self.remove_all_anomalies)
         self._delete_button.clicked.connect(self.delete_selected_points)
         self._reset_button.clicked.connect(self.reset_to_original_data)
         self._table.itemSelectionChanged.connect(self._update_window_state)
@@ -102,6 +112,10 @@ class MainWindow(QMainWindow):
     def _build_actions(self) -> None:
         open_action = QAction("Open NMEA File", self)
         open_action.triggered.connect(self.open_file_dialog)
+        detect_anomalies_action = QAction("Detect Anomalies", self)
+        detect_anomalies_action.triggered.connect(self.detect_anomalies)
+        remove_anomalies_action = QAction("Remove All Anomalies", self)
+        remove_anomalies_action.triggered.connect(self.remove_all_anomalies)
         delete_action = QAction("Delete Selected Points", self)
         delete_action.triggered.connect(self.delete_selected_points)
         reset_action = QAction("Reset to Original Data", self)
@@ -112,6 +126,8 @@ class MainWindow(QMainWindow):
         export_csv_action.triggered.connect(self.export_points_csv_file)
         export_json_action = QAction("Export Summary JSON", self)
         export_json_action.triggered.connect(self.export_summary_json_file)
+        self._detect_anomalies_action = detect_anomalies_action
+        self._remove_anomalies_action = remove_anomalies_action
         self._delete_action = delete_action
         self._reset_action = reset_action
         self._export_nmea_action = export_nmea_action
@@ -120,6 +136,8 @@ class MainWindow(QMainWindow):
 
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction(open_action)
+        file_menu.addAction(detect_anomalies_action)
+        file_menu.addAction(remove_anomalies_action)
         file_menu.addAction(delete_action)
         file_menu.addAction(reset_action)
         file_menu.addSeparator()
@@ -129,6 +147,8 @@ class MainWindow(QMainWindow):
 
         toolbar = QToolBar("Main", self)
         toolbar.addAction(open_action)
+        toolbar.addAction(detect_anomalies_action)
+        toolbar.addAction(remove_anomalies_action)
         toolbar.addAction(delete_action)
         toolbar.addAction(reset_action)
         toolbar.addSeparator()
@@ -159,6 +179,32 @@ class MainWindow(QMainWindow):
         self._session = TrackEditSession.from_track_result(result, file_path=input_path)
         self._apply_track_result(result)
         self.statusBar().showMessage(f"Loaded {input_path}")
+
+    def detect_anomalies(self) -> None:
+        if self._session is None:
+            return
+
+        result = self._session.detect_anomalies()
+        anomaly_count = len(self._session.anomaly_row_indexes())
+        self._apply_track_result(result)
+        if anomaly_count:
+            self.statusBar().showMessage(f"Detected anomalies in {anomaly_count} point(s)")
+            return
+
+        self.statusBar().showMessage("No anomalies detected")
+
+    def remove_all_anomalies(self) -> None:
+        if self._session is None:
+            return
+
+        anomaly_count = len(self._session.anomaly_row_indexes())
+        if not anomaly_count:
+            self.statusBar().showMessage("No anomaly points to remove")
+            return
+
+        result = self._session.remove_all_anomalies()
+        self._apply_track_result(result)
+        self.statusBar().showMessage(f"Removed {anomaly_count} anomaly point(s)")
 
     def delete_selected_points(self) -> None:
         if self._session is None:
@@ -257,12 +303,14 @@ class MainWindow(QMainWindow):
 
         for row_index, point in enumerate(points):
             row_values = track_point_to_row_values(point)
+            row_color = self._row_background_color(point)
+            row_tooltip = self._row_tooltip(point)
             for column_index, value in enumerate(row_values):
                 item = QTableWidgetItem(value)
-                if not point.is_valid:
-                    item.setBackground(INVALID_ROW_COLOR)
-                if column_index == len(row_values) - 1 and point.invalid_reason:
-                    item.setToolTip(point.invalid_reason)
+                if row_color is not None:
+                    item.setBackground(row_color)
+                if row_tooltip:
+                    item.setToolTip(row_tooltip)
                 self._table.setItem(row_index, column_index, item)
 
     def _apply_track_result(self, result: TrackResult) -> None:
@@ -301,11 +349,34 @@ class MainWindow(QMainWindow):
         input_path = self._session.file_path
         return input_path.with_name(f"{input_path.stem}_cleaned{suffix}")
 
+    def _row_background_color(self, point: TrackPoint) -> QColor | None:
+        has_anomalies = bool(point.anomaly_flags)
+        if has_anomalies and not point.is_valid:
+            return INVALID_ANOMALY_ROW_COLOR
+        if has_anomalies:
+            return ANOMALY_ROW_COLOR
+        if not point.is_valid:
+            return INVALID_ROW_COLOR
+        return None
+
+    def _row_tooltip(self, point: TrackPoint) -> str:
+        tooltip_lines: list[str] = []
+        if point.invalid_reason:
+            tooltip_lines.append(f"Invalid: {point.invalid_reason}")
+        if point.anomaly_flags:
+            tooltip_lines.append(f"Anomalies: {'; '.join(point.anomaly_flags)}")
+        return "\n".join(tooltip_lines)
+
     def _update_window_state(self) -> None:
         has_session = self._session is not None
         has_selection = bool(self._selected_row_indexes()) if has_session else False
         is_modified = self._session.is_modified if has_session else False
         has_result = has_session and self._session.current_result is not None
+        has_anomaly_points = (
+            bool(self._session.anomaly_row_indexes())
+            if has_session and self._session.current_result is not None
+            else False
+        )
 
         self.setWindowTitle(
             build_window_title(
@@ -314,8 +385,14 @@ class MainWindow(QMainWindow):
             )
         )
 
+        self._detect_anomalies_button.setEnabled(has_result)
+        self._remove_anomalies_button.setEnabled(has_anomaly_points)
         self._delete_button.setEnabled(has_selection)
         self._reset_button.setEnabled(has_session and is_modified)
+        if self._detect_anomalies_action is not None:
+            self._detect_anomalies_action.setEnabled(has_result)
+        if self._remove_anomalies_action is not None:
+            self._remove_anomalies_action.setEnabled(has_anomaly_points)
         if self._delete_action is not None:
             self._delete_action.setEnabled(has_selection)
         if self._reset_action is not None:

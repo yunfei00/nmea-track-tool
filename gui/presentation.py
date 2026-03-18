@@ -17,6 +17,7 @@ TABLE_COLUMNS = [
     ("hdop", "hdop"),
     ("is_valid", "is_valid"),
     ("invalid_reason", "invalid_reason"),
+    ("anomalies", "anomaly_flags"),
 ]
 
 SUMMARY_FIELDS = [
@@ -57,6 +58,7 @@ def track_point_to_row_values(point: TrackPoint) -> list[str]:
         format_value(point.hdop, decimals=1),
         "True" if point.is_valid else "False",
         point.invalid_reason,
+        "; ".join(point.anomaly_flags),
     ]
 
 
