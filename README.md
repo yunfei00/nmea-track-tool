@@ -1,32 +1,69 @@
 # nmea-track-tool
 
-`nmea-track-tool` is a small Python project for working with NMEA 0183 track data.
+`nmea-track-tool` is a small Python project for converting, analyzing, cleaning, and visualizing NMEA 0183 GPS tracks.
 
-It currently includes:
+It includes a one-time `UMT -> NMEA` converter, a reusable processing core, a command-line analyzer, and a PySide6 desktop viewer for interactive track inspection.
 
-- a one-time UMT -> NMEA converter
-- a reusable core pipeline for parsing, validating, segmenting, and summarizing tracks
-- a command-line analyzer
-- a PySide6 desktop viewer with summary, table, map, delete/reset workflow, and export actions
+## Key Features
+
+- UMT to NMEA conversion with checksum generation and simple CLI options
+- reusable core pipeline for parsing, validation, segmentation, metrics, anomaly detection, and smoothing
+- command-line track analysis with CSV and JSON export
+- desktop viewer with summary panel, editable point table, and interactive map
+- automatic anomaly detection for `high_speed`, `jump`, and `time_error`
+- optional moving-average smoothing for GPS jitter reduction
+- map visualization with raw or smoothed geometry and optional speed-based color gradient
+- edit workflow with delete, anomaly removal, reset, undo, and redo
+
+## Feature Overview
+
+### Anomaly Detection
+
+The viewer can mark suspicious GPS samples using simple rule-based checks:
+
+- `high_speed`
+- `jump`
+- `time_error`
+
+Detected anomaly points are highlighted in the table and shown as red markers on the map.
+
+### Smoothing
+
+The project supports a simple moving-average smoother for latitude and longitude only.
+
+- raw coordinates are preserved
+- smoothed coordinates are stored separately
+- the GUI can switch between raw and smoothed views
+
+### Visualization
+
+The map view supports:
+
+- track polylines
+- start and end markers
+- anomaly markers
+- optional color-by-speed rendering from blue to red
 
 ## Project Layout
 
 - `tools/umt_to_nmea/`
-  - one-time UMT -> NMEA converter
+  one-time UMT -> NMEA converter
 - `core/`
-  - reusable parsing, validation, segmentation, metrics, and pipeline code
+  reusable parsing, validation, segmentation, metrics, anomaly, smoothing, and pipeline logic
 - `cli/`
-  - command-line entry points
+  command-line analyzer
 - `gui/`
-  - PySide6 desktop viewer
+  PySide6 desktop viewer
 - `sample_data/`
-  - small demo files for testing and exploration
+  demo NMEA and UMT files
+- `docs/screenshots/`
+  README screenshot placeholders
 
 ## Installation
 
 Python 3.11 or newer is recommended.
 
-### 1. Create a virtual environment
+### 1. Create a Virtual Environment
 
 Windows:
 
@@ -42,7 +79,7 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 2. Install GUI dependency
+### 2. Install GUI Dependency
 
 The core pipeline and CLI use the Python standard library.
 The desktop viewer requires `PySide6`.
@@ -51,31 +88,39 @@ The desktop viewer requires `PySide6`.
 pip install PySide6
 ```
 
-### 3. Run tests
+### 3. Run Tests
 
 ```bash
 python -m unittest discover -s tests -t .
 ```
 
-## Sample Data
+## Demo Data
 
+The repository includes small demo tracks for quick exploration:
+
+- `sample_data/clean_track.nmea`
+  stable track with no deliberate anomalies
+- `sample_data/anomaly_track.nmea`
+  track with jump and timing issues to exercise anomaly detection
+- `sample_data/noisy_track.nmea`
+  track with visible GPS jitter for smoothing demos
 - `sample_data/demo_track.nmea`
-  - small demo NMEA track for the CLI and GUI
+  original small demo file used by earlier examples
 - `sample_data/xidantot3.umt`
-  - raw UMT input for the converter
+  raw UMT input for the converter
 
 ## CLI Usage
 
-Analyze an NMEA file:
+Analyze a clean demo track:
 
 ```bash
-python -m cli.nmea_track_cli analyze sample_data/demo_track.nmea
+python -m cli.nmea_track_cli analyze sample_data/clean_track.nmea
 ```
 
-Analyze and export the current point list and summary:
+Analyze an anomaly-heavy track and export structured output:
 
 ```bash
-python -m cli.nmea_track_cli analyze sample_data/demo_track.nmea --export-points-csv output/demo_points.csv --export-summary-json output/demo_summary.json
+python -m cli.nmea_track_cli analyze sample_data/anomaly_track.nmea --export-points-csv output/anomaly_points.csv --export-summary-json output/anomaly_summary.json
 ```
 
 Convert a UMT file to NMEA:
@@ -90,10 +135,10 @@ Convert a UMT file with an explicit UTC start datetime:
 python tools/umt_to_nmea/umt_to_nmea.py sample_data/xidantot3.umt -o output/converted_track.nmea --start-datetime 2026-03-12T00:00:00Z
 ```
 
-Convert only a time window and sample every 10th point:
+Convert only a time window:
 
 ```bash
-python tools/umt_to_nmea/umt_to_nmea.py sample_data/xidantot3.umt -o output/converted_track_window.nmea --time-start 10 --time-end 120 --sample-step 10
+python tools/umt_to_nmea/umt_to_nmea.py sample_data/xidantot3.umt -o output/converted_track_window.nmea --time-start 10 --time-end 120
 ```
 
 ## GUI Usage
@@ -104,29 +149,45 @@ Start the desktop viewer:
 python -m gui.app
 ```
 
-Then:
+Suggested demo flow:
 
-1. Click `Open NMEA File` or use the `File` menu.
-2. Open `sample_data/demo_track.nmea`.
-3. Review the summary panel, point table, and map view.
-4. Optionally delete bad points, reset to original data, or export the current working dataset.
+1. Open `sample_data/noisy_track.nmea`.
+2. Click `Apply Smoothing`.
+3. Enable `Show Smoothed View`.
+4. Enable `Color by Speed`.
+5. Switch to `sample_data/anomaly_track.nmea`.
+6. Click `Detect Anomalies`.
+7. Review the red anomaly markers on the map.
+8. Optionally click `Remove All Anomalies`, then use `Undo` and `Redo`.
 
-## Current GUI Features
+If Qt is not available in the current interpreter, running from the project virtual environment is the safest option:
 
-- open an NMEA file through the existing core pipeline
-- summary panel with point counts, segment count, distance, duration, and speeds
-- point table with invalid rows highlighted
-- map view with track polyline, start/end markers, and invalid-point markers
-- delete selected points from the working dataset
-- reset the working dataset back to the original loaded data
-- export cleaned NMEA, points CSV, and summary JSON
+```powershell
+.venv\Scripts\python.exe -m gui.app
+```
+
+## Screenshots
+
+### Gradient Track Placeholder
+
+![Gradient track placeholder](docs/screenshots/map-gradient-placeholder.svg)
+
+### Anomaly Marker Placeholder
+
+![Anomaly marker placeholder](docs/screenshots/anomaly-markers-placeholder.svg)
 
 ## Example Commands
 
-Quick CLI check:
+Quick CLI summary:
 
 ```bash
-python -m cli.nmea_track_cli analyze sample_data/demo_track.nmea
+python -m cli.nmea_track_cli analyze sample_data/clean_track.nmea
+```
+
+Anomaly demo:
+
+```bash
+python -m cli.nmea_track_cli analyze sample_data/anomaly_track.nmea
 ```
 
 GUI startup:
@@ -141,19 +202,8 @@ Full test suite:
 python -m unittest discover -s tests -t .
 ```
 
-## GUI Screenshot Placeholder
-
-Placeholder for the first public-release screenshot of the desktop viewer:
-
-- main window with summary panel
-- point table with invalid rows highlighted
-- map view showing track, start/end markers, and invalid-point markers
-
 ## Notes
 
 - The GUI uses the existing `core.pipeline` module and does not duplicate track parsing logic.
-- If your active interpreter cannot load Qt correctly, using the project virtual environment is the safest option:
-
-```powershell
-.venv\Scripts\python.exe -m gui.app
-```
+- Smoothing is optional and does not overwrite raw track data.
+- Visualization options are meant to stay lightweight and responsive for small to medium demo tracks.

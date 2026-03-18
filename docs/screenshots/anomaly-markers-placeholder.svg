@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">Anomaly Marker Placeholder</title>
+  <desc id="desc">Placeholder image showing anomaly markers on top of a track map.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#eef5f3"/>
+      <stop offset="100%" stop-color="#f5eee8"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="540" rx="28" fill="url(#bg)"/>
+  <rect x="28" y="28" width="904" height="484" rx="24" fill="#fbfaf7" stroke="#d5d8d2" stroke-width="2"/>
+  <g opacity="0.5" stroke="#d8e1e4" stroke-width="2">
+    <path d="M90 120 H870"/>
+    <path d="M90 220 H870"/>
+    <path d="M90 320 H870"/>
+    <path d="M90 420 H870"/>
+    <path d="M180 70 V470"/>
+    <path d="M340 70 V470"/>
+    <path d="M500 70 V470"/>
+    <path d="M660 70 V470"/>
+    <path d="M820 70 V470"/>
+  </g>
+  <path d="M140 370 C220 330 300 280 370 290 S520 350 620 280 S750 210 830 180" fill="none" stroke="#1f6f78" stroke-linecap="round" stroke-linejoin="round" stroke-width="12"/>
+  <circle cx="140" cy="370" r="11" fill="#2a9d5b" stroke="#1a4d2e" stroke-width="4"/>
+  <circle cx="830" cy="180" r="11" fill="#f4a261" stroke="#7f4f24" stroke-width="4"/>
+  <g>
+    <circle cx="410" cy="305" r="14" fill="#ff3b30" stroke="#8b0000" stroke-width="5"/>
+    <circle cx="620" cy="280" r="14" fill="#ff3b30" stroke="#8b0000" stroke-width="5"/>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#373c3a">
+    <text x="64" y="84" font-size="28" font-weight="700">Anomaly Marker View</text>
+    <text x="64" y="116" font-size="18">Placeholder for anomaly detection screenshot</text>
+    <text x="64" y="468" font-size="18">Red markers highlight high-speed, jump, or time-error points</text>
+  </g>
+</svg>

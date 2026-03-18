@@ -209,4 +209,7 @@ __marimo__/
 
 *.nmea
 !sample_data/demo_track.nmea
+!sample_data/clean_track.nmea
+!sample_data/anomaly_track.nmea
+!sample_data/noisy_track.nmea
 /output
