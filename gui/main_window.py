@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QGridLayout,
     QCheckBox,
     QFileDialog,
     QFormLayout,
@@ -13,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -24,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cli.generate_track import generate_track_file
 from core.pipeline import TrackResult, build_track_from_file
 from core.smoothing import DEFAULT_SMOOTHING_WINDOW
 from core.track_model import TrackPoint
@@ -35,17 +39,38 @@ from gui.presentation import SUMMARY_FIELDS, TABLE_COLUMNS, build_summary_rows, 
 INVALID_ROW_COLOR = QColor(255, 235, 238)
 ANOMALY_ROW_COLOR = QColor(255, 205, 210)
 INVALID_ANOMALY_ROW_COLOR = QColor(239, 154, 154)
+GenerateTrackFn = Callable[..., object]
+MapViewFactory = Callable[[], QWidget]
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        generate_track_fn: GenerateTrackFn = generate_track_file,
+        map_view_factory: MapViewFactory | None = None,
+    ) -> None:
         super().__init__()
         self.resize(1200, 720)
 
         self._session: TrackEditSession | None = None
         self._summary_labels: dict[str, QLabel] = {}
         self._table = QTableWidget(0, len(TABLE_COLUMNS))
-        self._map_view = TrackMapView()
+        self._map_view = (
+            map_view_factory()
+            if map_view_factory is not None
+            else TrackMapView()
+        )
+        self._generate_track_fn = generate_track_fn
+        self._start_lat_edit = QLineEdit()
+        self._start_lon_edit = QLineEdit()
+        self._end_lat_edit = QLineEdit()
+        self._end_lon_edit = QLineEdit()
+        self._generator_output_edit = QLineEdit(str(self._default_generated_output_path()))
+        self._browse_generator_output_button = QPushButton("Browse")
+        self._generate_button = QPushButton("Generate Track")
+        self._generated_output_label = QLabel("No generated file yet")
+        self._generation_preview_label = QLabel("No generated preview yet")
         self._open_button = QPushButton("Open NMEA File")
         self._undo_button = QPushButton("Undo")
         self._redo_button = QPushButton("Redo")
@@ -77,6 +102,26 @@ class MainWindow(QMainWindow):
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
+
+        generator_group = QGroupBox("Track Generator")
+        generator_layout = QGridLayout(generator_group)
+        generator_layout.addWidget(QLabel("Start Lat"), 0, 0)
+        generator_layout.addWidget(self._start_lat_edit, 0, 1)
+        generator_layout.addWidget(QLabel("Start Lon"), 0, 2)
+        generator_layout.addWidget(self._start_lon_edit, 0, 3)
+        generator_layout.addWidget(QLabel("End Lat"), 1, 0)
+        generator_layout.addWidget(self._end_lat_edit, 1, 1)
+        generator_layout.addWidget(QLabel("End Lon"), 1, 2)
+        generator_layout.addWidget(self._end_lon_edit, 1, 3)
+        generator_layout.addWidget(QLabel("Output File"), 2, 0)
+        generator_layout.addWidget(self._generator_output_edit, 2, 1, 1, 3)
+        generator_layout.addWidget(self._browse_generator_output_button, 2, 4)
+        generator_layout.addWidget(self._generate_button, 0, 4, 2, 1)
+        generator_layout.addWidget(QLabel("Last Output"), 3, 0)
+        generator_layout.addWidget(self._generated_output_label, 3, 1, 1, 4)
+        generator_layout.addWidget(QLabel("Preview"), 4, 0)
+        generator_layout.addWidget(self._generation_preview_label, 4, 1, 1, 4)
+        root_layout.addWidget(generator_group)
 
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(self._open_button)
@@ -118,6 +163,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         self.statusBar().showMessage("Ready")
 
+        self._browse_generator_output_button.clicked.connect(self.browse_generator_output_path)
+        self._generate_button.clicked.connect(self.generate_track_from_inputs)
         self._open_button.clicked.connect(self.open_file_dialog)
         self._undo_button.clicked.connect(self.undo_last_edit)
         self._redo_button.clicked.connect(self.redo_last_edit)
@@ -129,6 +176,57 @@ class MainWindow(QMainWindow):
         self._delete_button.clicked.connect(self.delete_selected_points)
         self._reset_button.clicked.connect(self.reset_to_original_data)
         self._table.itemSelectionChanged.connect(self._update_window_state)
+
+    def browse_generator_output_path(self) -> None:
+        suggested_path = Path(self._generator_output_edit.text().strip() or self._default_generated_output_path())
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select Generated NMEA Output",
+            str(suggested_path),
+            "NMEA Files (*.nmea);;All Files (*)",
+        )
+        if filename:
+            self._generator_output_edit.setText(filename)
+
+    def generate_track_from_inputs(self) -> None:
+        try:
+            start = (
+                self._parse_coordinate_value(self._start_lat_edit.text(), "Start latitude", -90.0, 90.0),
+                self._parse_coordinate_value(self._start_lon_edit.text(), "Start longitude", -180.0, 180.0),
+            )
+            end = (
+                self._parse_coordinate_value(self._end_lat_edit.text(), "End latitude", -90.0, 90.0),
+                self._parse_coordinate_value(self._end_lon_edit.text(), "End longitude", -180.0, 180.0),
+            )
+            output_path = Path(
+                self._generator_output_edit.text().strip()
+                or self._default_generated_output_path()
+            )
+            result = self._generate_track_fn(
+                start=start,
+                end=end,
+                output_path=output_path,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Generate Failed", f"Could not generate track:\n{exc}")
+            self.statusBar().showMessage("Track generation failed")
+            return
+
+        output_path = Path(output_path)
+        self._generator_output_edit.setText(str(output_path))
+        self._generated_output_label.setText(str(output_path))
+        self._generation_preview_label.setText(
+            "Generated "
+            f"{len(result.track_points)} points, "
+            f"{len(result.traffic_light_stop_segments)} traffic-light stops"
+        )
+        self.load_file(output_path)
+        QMessageBox.information(
+            self,
+            "Track Generated",
+            f"Track generated successfully.\nOutput file:\n{output_path}",
+        )
+        self.statusBar().showMessage(f"Generated track to {output_path}")
 
     def _build_actions(self) -> None:
         open_action = QAction("Open NMEA File", self)
@@ -532,3 +630,27 @@ class MainWindow(QMainWindow):
             self._export_csv_action.setEnabled(has_result)
         if self._export_json_action is not None:
             self._export_json_action.setEnabled(has_result)
+
+    def _default_generated_output_path(self) -> Path:
+        return Path.cwd() / "output" / "generated_track.nmea"
+
+    def _parse_coordinate_value(
+        self,
+        value: str,
+        label: str,
+        minimum: float,
+        maximum: float,
+    ) -> float:
+        text = value.strip()
+        if not text:
+            raise ValueError(f"{label} is required.")
+
+        try:
+            parsed = float(text)
+        except ValueError as exc:
+            raise ValueError(f"{label} must be a valid number.") from exc
+
+        if not minimum <= parsed <= maximum:
+            raise ValueError(f"{label} must be in [{minimum}, {maximum}].")
+
+        return parsed
