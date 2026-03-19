@@ -32,6 +32,18 @@ class RoutePath:
 
 
 @dataclass(slots=True)
+class StopSegment:
+    path_distance_m: float
+    duration_s: float
+
+    def __post_init__(self) -> None:
+        if self.path_distance_m < 0.0:
+            raise ValueError("path_distance_m must be non-negative.")
+        if self.duration_s < 0.0:
+            raise ValueError("duration_s must be non-negative.")
+
+
+@dataclass(slots=True)
 class GeneratedTrackPoint:
     seconds_from_start: float
     lat: float
