@@ -86,6 +86,34 @@ class MapHelperTests(unittest.TestCase):
         self.assertIn("End", html)
         self.assertIn('"polylines":[[[1.0,2.0],[3.0,4.0]]]', html)
 
+    def test_build_map_payload_includes_picked_start_end_markers(self) -> None:
+        payload = build_map_payload(
+            None,
+            picked_start=(39.9042, 116.4074),
+            picked_end=(39.9142, 116.4274),
+            active_pick_mode="start",
+        )
+
+        self.assertEqual(payload["picked_start_point"]["label"], "Selected Start")
+        self.assertEqual(payload["picked_end_point"]["label"], "Selected End")
+        self.assertEqual(payload["active_pick_mode"], "start")
+        self.assertAlmostEqual(payload["picked_start_point"]["lat"], 39.9042, places=6)
+        self.assertAlmostEqual(payload["picked_end_point"]["lon"], 116.4274, places=6)
+
+    def test_build_map_html_contains_pick_mode_and_selected_marker_labels(self) -> None:
+        html = build_map_html(
+            None,
+            picked_start=(39.9042, 116.4074),
+            picked_end=(39.9142, 116.4274),
+            active_pick_mode="end",
+        )
+
+        self.assertIn('"picked_start_point":{"lat":39.9042,"lon":116.4074,"label":"Selected Start"}', html)
+        self.assertIn('"picked_end_point":{"lat":39.9142,"lon":116.4274,"label":"Selected End"}', html)
+        self.assertIn('"active_pick_mode":"end"', html)
+        self.assertIn("updatePickBanner(trackData.active_pick_mode);", html)
+        self.assertIn("pick-banner", html)
+
     def test_build_map_payload_can_color_track_by_speed_and_include_anomaly_points(self) -> None:
         points = [
             TrackPoint(time_str="000000.00", lat=0.0, lon=0.0, is_valid=True),

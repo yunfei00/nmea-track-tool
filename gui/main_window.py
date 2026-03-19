@@ -67,10 +67,13 @@ class MainWindow(QMainWindow):
         self._end_lat_edit = QLineEdit()
         self._end_lon_edit = QLineEdit()
         self._generator_output_edit = QLineEdit(str(self._default_generated_output_path()))
+        self._pick_start_button = QPushButton("Pick Start")
+        self._pick_end_button = QPushButton("Pick End")
         self._browse_generator_output_button = QPushButton("Browse")
         self._generate_button = QPushButton("Generate Track")
         self._generated_output_label = QLabel("No generated file yet")
         self._generation_preview_label = QLabel("No generated preview yet")
+        self._active_pick_mode: str | None = None
         self._open_button = QPushButton("Open NMEA File")
         self._undo_button = QPushButton("Undo")
         self._redo_button = QPushButton("Redo")
@@ -105,22 +108,26 @@ class MainWindow(QMainWindow):
 
         generator_group = QGroupBox("Track Generator")
         generator_layout = QGridLayout(generator_group)
+        self._pick_start_button.setCheckable(True)
+        self._pick_end_button.setCheckable(True)
         generator_layout.addWidget(QLabel("Start Lat"), 0, 0)
         generator_layout.addWidget(self._start_lat_edit, 0, 1)
         generator_layout.addWidget(QLabel("Start Lon"), 0, 2)
         generator_layout.addWidget(self._start_lon_edit, 0, 3)
+        generator_layout.addWidget(self._pick_start_button, 0, 4)
         generator_layout.addWidget(QLabel("End Lat"), 1, 0)
         generator_layout.addWidget(self._end_lat_edit, 1, 1)
         generator_layout.addWidget(QLabel("End Lon"), 1, 2)
         generator_layout.addWidget(self._end_lon_edit, 1, 3)
+        generator_layout.addWidget(self._pick_end_button, 1, 4)
         generator_layout.addWidget(QLabel("Output File"), 2, 0)
         generator_layout.addWidget(self._generator_output_edit, 2, 1, 1, 3)
         generator_layout.addWidget(self._browse_generator_output_button, 2, 4)
-        generator_layout.addWidget(self._generate_button, 0, 4, 2, 1)
+        generator_layout.addWidget(self._generate_button, 0, 5, 3, 1)
         generator_layout.addWidget(QLabel("Last Output"), 3, 0)
-        generator_layout.addWidget(self._generated_output_label, 3, 1, 1, 4)
+        generator_layout.addWidget(self._generated_output_label, 3, 1, 1, 5)
         generator_layout.addWidget(QLabel("Preview"), 4, 0)
-        generator_layout.addWidget(self._generation_preview_label, 4, 1, 1, 4)
+        generator_layout.addWidget(self._generation_preview_label, 4, 1, 1, 5)
         root_layout.addWidget(generator_group)
 
         controls_layout = QHBoxLayout()
@@ -165,6 +172,12 @@ class MainWindow(QMainWindow):
 
         self._browse_generator_output_button.clicked.connect(self.browse_generator_output_path)
         self._generate_button.clicked.connect(self.generate_track_from_inputs)
+        self._pick_start_button.clicked.connect(self.toggle_pick_start_mode)
+        self._pick_end_button.clicked.connect(self.toggle_pick_end_mode)
+        self._start_lat_edit.editingFinished.connect(self.refresh_generator_markers)
+        self._start_lon_edit.editingFinished.connect(self.refresh_generator_markers)
+        self._end_lat_edit.editingFinished.connect(self.refresh_generator_markers)
+        self._end_lon_edit.editingFinished.connect(self.refresh_generator_markers)
         self._open_button.clicked.connect(self.open_file_dialog)
         self._undo_button.clicked.connect(self.undo_last_edit)
         self._redo_button.clicked.connect(self.redo_last_edit)
@@ -176,6 +189,8 @@ class MainWindow(QMainWindow):
         self._delete_button.clicked.connect(self.delete_selected_points)
         self._reset_button.clicked.connect(self.reset_to_original_data)
         self._table.itemSelectionChanged.connect(self._update_window_state)
+        if hasattr(self._map_view, "mapClicked"):
+            self._map_view.mapClicked.connect(self._handle_map_click)
 
     def browse_generator_output_path(self) -> None:
         suggested_path = Path(self._generator_output_edit.text().strip() or self._default_generated_output_path())
@@ -227,6 +242,76 @@ class MainWindow(QMainWindow):
             f"Track generated successfully.\nOutput file:\n{output_path}",
         )
         self.statusBar().showMessage(f"Generated track to {output_path}")
+
+    def toggle_pick_start_mode(self, checked: bool) -> None:
+        self._set_pick_mode("start" if checked else None)
+
+    def toggle_pick_end_mode(self, checked: bool) -> None:
+        self._set_pick_mode("end" if checked else None)
+
+    def refresh_generator_markers(self) -> None:
+        start = self._try_parse_coordinate_pair(
+            self._start_lat_edit.text(),
+            self._start_lon_edit.text(),
+        )
+        end = self._try_parse_coordinate_pair(
+            self._end_lat_edit.text(),
+            self._end_lon_edit.text(),
+        )
+        self._sync_map_picker_state(start=start, end=end)
+
+    def _handle_map_click(self, latitude: float, longitude: float) -> None:
+        if self._active_pick_mode == "start":
+            self._start_lat_edit.setText(f"{latitude:.6f}")
+            self._start_lon_edit.setText(f"{longitude:.6f}")
+            self.refresh_generator_markers()
+            self._set_pick_mode(None)
+            self.statusBar().showMessage("Start point selected from map")
+            return
+
+        if self._active_pick_mode == "end":
+            self._end_lat_edit.setText(f"{latitude:.6f}")
+            self._end_lon_edit.setText(f"{longitude:.6f}")
+            self.refresh_generator_markers()
+            self._set_pick_mode(None)
+            self.statusBar().showMessage("End point selected from map")
+
+    def _set_pick_mode(self, mode: str | None) -> None:
+        self._active_pick_mode = mode
+        self._pick_start_button.blockSignals(True)
+        self._pick_end_button.blockSignals(True)
+        self._pick_start_button.setChecked(mode == "start")
+        self._pick_end_button.setChecked(mode == "end")
+        self._pick_start_button.blockSignals(False)
+        self._pick_end_button.blockSignals(False)
+
+        self._sync_map_picker_state()
+        if mode == "start":
+            self.statusBar().showMessage("Pick Start active: click the map to choose coordinates")
+        elif mode == "end":
+            self.statusBar().showMessage("Pick End active: click the map to choose coordinates")
+
+    def _sync_map_picker_state(
+        self,
+        *,
+        start: tuple[float, float] | None = None,
+        end: tuple[float, float] | None = None,
+    ) -> None:
+        if start is None:
+            start = self._try_parse_coordinate_pair(
+                self._start_lat_edit.text(),
+                self._start_lon_edit.text(),
+            )
+        if end is None:
+            end = self._try_parse_coordinate_pair(
+                self._end_lat_edit.text(),
+                self._end_lon_edit.text(),
+            )
+
+        if hasattr(self._map_view, "set_picked_points"):
+            self._map_view.set_picked_points(start=start, end=end)
+        if hasattr(self._map_view, "set_pick_mode"):
+            self._map_view.set_pick_mode(self._active_pick_mode)
 
     def _build_actions(self) -> None:
         open_action = QAction("Open NMEA File", self)
@@ -524,6 +609,7 @@ class MainWindow(QMainWindow):
             ),
             color_by_speed=self._color_by_speed_enabled,
         )
+        self._sync_map_picker_state()
         self._update_window_state()
 
     def _selected_row_indexes(self) -> list[int]:
@@ -630,6 +716,9 @@ class MainWindow(QMainWindow):
             self._export_csv_action.setEnabled(has_result)
         if self._export_json_action is not None:
             self._export_json_action.setEnabled(has_result)
+        picker_supported = hasattr(self._map_view, "set_pick_mode")
+        self._pick_start_button.setEnabled(picker_supported)
+        self._pick_end_button.setEnabled(picker_supported)
 
     def _default_generated_output_path(self) -> Path:
         return Path.cwd() / "output" / "generated_track.nmea"
@@ -654,3 +743,16 @@ class MainWindow(QMainWindow):
             raise ValueError(f"{label} must be in [{minimum}, {maximum}].")
 
         return parsed
+
+    def _try_parse_coordinate_pair(
+        self,
+        latitude_text: str,
+        longitude_text: str,
+    ) -> tuple[float, float] | None:
+        try:
+            latitude = self._parse_coordinate_value(latitude_text, "Latitude", -90.0, 90.0)
+            longitude = self._parse_coordinate_value(longitude_text, "Longitude", -180.0, 180.0)
+        except ValueError:
+            return None
+
+        return latitude, longitude

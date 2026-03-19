@@ -11,10 +11,13 @@ from cli.generate_track import generate_track_file
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
+    from PySide6.QtCore import QObject, Signal
     from PySide6.QtWidgets import QApplication, QWidget
     from gui.main_window import MainWindow
 except Exception as import_error:  # pragma: no cover - environment-dependent skip path
     QApplication = None
+    QObject = object
+    Signal = None
     QWidget = object
     MainWindow = None
     _GUI_IMPORT_ERROR = import_error
@@ -69,21 +72,83 @@ class GUITrackGenerationTests(unittest.TestCase):
         critical_mock.assert_called_once()
         self.assertEqual(window._generated_output_label.text(), "No generated file yet")
 
+    def test_main_window_map_click_sets_start_then_exits_pick_mode(self) -> None:
+        window = MainWindow(
+            generate_track_fn=_mock_generate_track_file,
+            map_view_factory=_FakeMapView,
+        )
 
-class _FakeMapView(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        self.last_result = None
+        window.toggle_pick_start_mode(True)
+        window._handle_map_click(39.9042, 116.4074)
 
-    def set_track_result(
-        self,
-        result,
-        *,
-        use_smoothed_coordinates: bool = False,
-        color_by_speed: bool = False,
-    ) -> None:
-        del use_smoothed_coordinates, color_by_speed
-        self.last_result = result
+        self.assertEqual(window._start_lat_edit.text(), "39.904200")
+        self.assertEqual(window._start_lon_edit.text(), "116.407400")
+        self.assertFalse(window._pick_start_button.isChecked())
+        self.assertEqual(window._map_view.last_pick_mode, None)
+        self.assertEqual(window._map_view.last_picked_start, (39.9042, 116.4074))
+
+
+if Signal is not None:
+    class _FakeMapView(QWidget):
+        mapClicked = Signal(float, float)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.last_result = None
+            self.last_pick_mode = None
+            self.last_picked_start = None
+            self.last_picked_end = None
+
+        def set_track_result(
+            self,
+            result,
+            *,
+            use_smoothed_coordinates: bool = False,
+            color_by_speed: bool = False,
+        ) -> None:
+            del use_smoothed_coordinates, color_by_speed
+            self.last_result = result
+
+        def set_picked_points(
+            self,
+            *,
+            start=None,
+            end=None,
+        ) -> None:
+            self.last_picked_start = start
+            self.last_picked_end = end
+
+        def set_pick_mode(self, mode) -> None:
+            self.last_pick_mode = mode
+else:
+    class _FakeMapView(QWidget):
+        def __init__(self) -> None:
+            self.last_result = None
+            self.last_pick_mode = None
+            self.last_picked_start = None
+            self.last_picked_end = None
+
+        def set_track_result(
+            self,
+            result,
+            *,
+            use_smoothed_coordinates: bool = False,
+            color_by_speed: bool = False,
+        ) -> None:
+            del use_smoothed_coordinates, color_by_speed
+            self.last_result = result
+
+        def set_picked_points(
+            self,
+            *,
+            start=None,
+            end=None,
+        ) -> None:
+            self.last_picked_start = start
+            self.last_picked_end = end
+
+        def set_pick_mode(self, mode) -> None:
+            self.last_pick_mode = mode
 
 
 def _mock_generate_track_file(

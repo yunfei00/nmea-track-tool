@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 from core.geo import calc_speed_kmh, haversine_m
 from core.pipeline import TrackResult
@@ -85,6 +86,9 @@ def build_map_payload(
     *,
     use_smoothed_coordinates: bool = False,
     color_by_speed: bool = False,
+    picked_start: tuple[float, float] | None = None,
+    picked_end: tuple[float, float] | None = None,
+    active_pick_mode: Literal["start", "end"] | None = None,
 ) -> dict[str, object]:
     if result is None:
         return {
@@ -94,6 +98,9 @@ def build_map_payload(
             "anomaly_points": [],
             "start_point": None,
             "end_point": None,
+            "picked_start_point": _picked_point_payload(picked_start, label="Selected Start"),
+            "picked_end_point": _picked_point_payload(picked_end, label="Selected End"),
+            "active_pick_mode": active_pick_mode,
             "color_by_speed": color_by_speed,
         }
 
@@ -196,6 +203,9 @@ def build_map_payload(
         "anomaly_points": anomaly_points,
         "start_point": start_point,
         "end_point": end_point,
+        "picked_start_point": _picked_point_payload(picked_start, label="Selected Start"),
+        "picked_end_point": _picked_point_payload(picked_end, label="Selected End"),
+        "active_pick_mode": active_pick_mode,
         "color_by_speed": color_by_speed,
     }
 
@@ -205,11 +215,17 @@ def build_map_html(
     *,
     use_smoothed_coordinates: bool = False,
     color_by_speed: bool = False,
+    picked_start: tuple[float, float] | None = None,
+    picked_end: tuple[float, float] | None = None,
+    active_pick_mode: Literal["start", "end"] | None = None,
 ) -> str:
     payload = build_map_payload(
         result,
         use_smoothed_coordinates=use_smoothed_coordinates,
         color_by_speed=color_by_speed,
+        picked_start=picked_start,
+        picked_end=picked_end,
+        active_pick_mode=active_pick_mode,
     )
     payload_json = json.dumps(payload, separators=(",", ":"))
 
@@ -243,18 +259,54 @@ def build_map_html(
       font-size: 14px;
       letter-spacing: 0.02em;
     }}
+    .map-pick-banner {{
+      position: absolute;
+      z-index: 1000;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(25, 29, 32, 0.88);
+      color: #fffaf0;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    }}
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div id="pick-banner" class="map-pick-banner" style="display:none;"></div>
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script>
     const trackData = {payload_json};
     const mapElement = document.getElementById("map");
+    const pickBanner = document.getElementById("pick-banner");
+    let mapBridge = null;
+
+    function updatePickBanner(activePickMode) {{
+      if (!activePickMode) {{
+        pickBanner.style.display = "none";
+        pickBanner.textContent = "";
+        return;
+      }}
+
+      const label = activePickMode === "start" ? "start" : "end";
+      pickBanner.textContent = `Click the map to set the ${{label}} point`;
+      pickBanner.style.display = "block";
+    }}
+
+    if (window.qt && window.qt.webChannelTransport && window.QWebChannel) {{
+      new QWebChannel(window.qt.webChannelTransport, function(channel) {{
+        mapBridge = channel.objects.mapBridge || null;
+      }});
+    }}
 
     if (!window.L) {{
       mapElement.innerHTML = '<div class="map-empty">Leaflet failed to load.</div>';
@@ -264,7 +316,9 @@ def build_map_html(
       trackData.invalid_points.length === 0 &&
       trackData.anomaly_points.length === 0 &&
       !trackData.start_point &&
-      !trackData.end_point
+      !trackData.end_point &&
+      !trackData.picked_start_point &&
+      !trackData.picked_end_point
     ) {{
       mapElement.innerHTML = '<div class="map-empty">Open an NMEA file to view the track.</div>';
     }} else {{
@@ -279,6 +333,13 @@ def build_map_html(
       }}).addTo(map);
 
       const bounds = [];
+      updatePickBanner(trackData.active_pick_mode);
+
+      map.on("click", function(event) {{
+        if (mapBridge && mapBridge.reportMapClick) {{
+          mapBridge.reportMapClick(event.latlng.lat, event.latlng.lng);
+        }}
+      }});
 
       if (trackData.color_by_speed && trackData.speed_polylines.length > 0) {{
         for (const segment of trackData.speed_polylines) {{
@@ -350,6 +411,30 @@ def build_map_html(
           weight: 2
         }}).addTo(map);
         marker.bindPopup(`<strong>End</strong><br>${{trackData.end_point.time_str}}`);
+        bounds.push(marker.getLatLng());
+      }}
+
+      if (trackData.picked_start_point) {{
+        const marker = L.circleMarker([trackData.picked_start_point.lat, trackData.picked_start_point.lon], {{
+          radius: 9,
+          color: "#0f5132",
+          fillColor: "#2fbf71",
+          fillOpacity: 0.95,
+          weight: 3
+        }}).addTo(map);
+        marker.bindPopup(`<strong>${{trackData.picked_start_point.label}}</strong>`);
+        bounds.push(marker.getLatLng());
+      }}
+
+      if (trackData.picked_end_point) {{
+        const marker = L.circleMarker([trackData.picked_end_point.lat, trackData.picked_end_point.lon], {{
+          radius: 9,
+          color: "#9a3412",
+          fillColor: "#fb923c",
+          fillOpacity: 0.95,
+          weight: 3
+        }}).addTo(map);
+        marker.bindPopup(`<strong>${{trackData.picked_end_point.label}}</strong>`);
         bounds.push(marker.getLatLng());
       }}
 
@@ -461,3 +546,18 @@ def _time_seconds_or_none(point: TrackPoint) -> float | None:
         return time_str_to_seconds(point.time_str)
     except ValueError:
         return None
+
+
+def _picked_point_payload(
+    point: tuple[float, float] | None,
+    *,
+    label: str,
+) -> dict[str, object] | None:
+    if point is None:
+        return None
+
+    return {
+        "lat": point[0],
+        "lon": point[1],
+        "label": label,
+    }
