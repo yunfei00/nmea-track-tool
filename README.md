@@ -9,6 +9,7 @@ It includes a one-time `UMT -> NMEA` converter, a reusable processing core, a co
 - UMT to NMEA conversion with checksum generation and simple CLI options
 - reusable core pipeline for parsing, validation, segmentation, metrics, anomaly detection, and smoothing
 - command-line track analysis with CSV and JSON export
+- generator CLI for start/end route generation into replayable NMEA
 - desktop viewer with summary panel, editable point table, and interactive map
 - automatic anomaly detection for `high_speed`, `jump`, and `time_error`
 - optional moving-average smoothing for GPS jitter reduction
@@ -51,7 +52,9 @@ The map view supports:
 - `core/`
   reusable parsing, validation, segmentation, metrics, anomaly, smoothing, and pipeline logic
 - `cli/`
-  command-line analyzer
+  command-line analyzer and generator entrypoints
+- `generator/`
+  route planning, motion model, traffic-light simulation, and NMEA generation
 - `gui/`
   PySide6 desktop viewer
 - `sample_data/`
@@ -123,6 +126,18 @@ Analyze an anomaly-heavy track and export structured output:
 python -m cli.nmea_track_cli analyze sample_data/anomaly_track.nmea --export-points-csv output/anomaly_points.csv --export-summary-json output/anomaly_summary.json
 ```
 
+Generate a route as NMEA with OSRM routing:
+
+```bash
+python -m cli.generate_track --start "39.9042,116.4074" --end "39.9142,116.4274" --output output/generated_route.nmea
+```
+
+Generate a route without network access by using the mock router:
+
+```bash
+python -m cli.generate_track --start "39.9042,116.4074" --end "39.9142,116.4274" --output output/generated_route_mock.nmea --routing-mode mock
+```
+
 Convert a UMT file to NMEA:
 
 ```bash
@@ -182,6 +197,12 @@ Quick CLI summary:
 
 ```bash
 python -m cli.nmea_track_cli analyze sample_data/clean_track.nmea
+```
+
+Route generation:
+
+```bash
+python -m cli.generate_track --start "39.9042,116.4074" --end "39.9142,116.4274" --output output/generated_route.nmea
 ```
 
 Anomaly demo:
