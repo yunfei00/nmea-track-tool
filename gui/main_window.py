@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -31,8 +30,23 @@ from cli.generate_track import generate_track_file
 from core.pipeline import TrackResult, build_track_from_file
 from core.smoothing import DEFAULT_SMOOTHING_WINDOW
 from core.track_model import TrackPoint
+from geo.geocoder import GeocodingError, NominatimGeocoder
 from gui.editing import TrackEditSession, build_window_title
 from gui.exporting import export_cleaned_nmea, export_points_csv, export_summary_json
+from gui.generator_home import (
+    DEFAULT_MAP_VIEW,
+    GeocoderLike,
+    MapViewport,
+    ResolvedLocationInput,
+    format_resolution_error,
+    format_resolution_feedback,
+    format_coordinate_pair,
+    load_startup_map_view,
+    parse_coordinate_value,
+    resolve_location_text,
+    save_map_view,
+    try_parse_coordinate_pair,
+)
 from gui.map_view import TrackMapView
 from gui.presentation import SUMMARY_FIELDS, TABLE_COLUMNS, build_summary_rows, track_point_to_row_values
 
@@ -49,6 +63,9 @@ class MainWindow(QMainWindow):
         *,
         generate_track_fn: GenerateTrackFn = generate_track_file,
         map_view_factory: MapViewFactory | None = None,
+        map_state_path: Path | None = None,
+        default_map_view: MapViewport = DEFAULT_MAP_VIEW,
+        geocoder: GeocoderLike | None = None,
     ) -> None:
         super().__init__()
         self.resize(1200, 720)
@@ -62,17 +79,25 @@ class MainWindow(QMainWindow):
             else TrackMapView()
         )
         self._generate_track_fn = generate_track_fn
+        self._geocoder = geocoder or NominatimGeocoder()
+        self._start_location_edit = QLineEdit()
         self._start_lat_edit = QLineEdit()
         self._start_lon_edit = QLineEdit()
+        self._end_location_edit = QLineEdit()
         self._end_lat_edit = QLineEdit()
         self._end_lon_edit = QLineEdit()
         self._generator_output_edit = QLineEdit(str(self._default_generated_output_path()))
+        self._resolve_start_button = QPushButton("Locate")
+        self._resolve_end_button = QPushButton("Locate")
         self._pick_start_button = QPushButton("Pick Start")
         self._pick_end_button = QPushButton("Pick End")
         self._browse_generator_output_button = QPushButton("Browse")
         self._generate_button = QPushButton("Generate Track")
         self._generated_output_label = QLabel("No generated file yet")
         self._generation_preview_label = QLabel("No generated preview yet")
+        self._resolution_feedback_label = QLabel(
+            "Enter a start/end address or lat,lon. Press Enter or leave the field to resolve."
+        )
         self._active_pick_mode: str | None = None
         self._open_button = QPushButton("Open NMEA File")
         self._undo_button = QPushButton("Undo")
@@ -96,8 +121,15 @@ class MainWindow(QMainWindow):
         self._export_nmea_action: QAction | None = None
         self._export_csv_action: QAction | None = None
         self._export_json_action: QAction | None = None
+        self._map_state_path = map_state_path
+        self._default_map_view = default_map_view
+        self._startup_map_view = load_startup_map_view(
+            path=self._map_state_path,
+            default_view=self._default_map_view,
+        )
 
         self._build_ui()
+        self._apply_startup_map_view()
         self._update_window_state()
 
     def _build_ui(self) -> None:
@@ -105,44 +137,59 @@ class MainWindow(QMainWindow):
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
+        sidebar_layout = QVBoxLayout()
 
         generator_group = QGroupBox("Track Generator")
         generator_layout = QGridLayout(generator_group)
         self._pick_start_button.setCheckable(True)
         self._pick_end_button.setCheckable(True)
-        generator_layout.addWidget(QLabel("Start Lat"), 0, 0)
-        generator_layout.addWidget(self._start_lat_edit, 0, 1)
-        generator_layout.addWidget(QLabel("Start Lon"), 0, 2)
-        generator_layout.addWidget(self._start_lon_edit, 0, 3)
-        generator_layout.addWidget(self._pick_start_button, 0, 4)
-        generator_layout.addWidget(QLabel("End Lat"), 1, 0)
-        generator_layout.addWidget(self._end_lat_edit, 1, 1)
-        generator_layout.addWidget(QLabel("End Lon"), 1, 2)
-        generator_layout.addWidget(self._end_lon_edit, 1, 3)
-        generator_layout.addWidget(self._pick_end_button, 1, 4)
-        generator_layout.addWidget(QLabel("Output File"), 2, 0)
-        generator_layout.addWidget(self._generator_output_edit, 2, 1, 1, 3)
-        generator_layout.addWidget(self._browse_generator_output_button, 2, 4)
-        generator_layout.addWidget(self._generate_button, 0, 5, 3, 1)
-        generator_layout.addWidget(QLabel("Last Output"), 3, 0)
-        generator_layout.addWidget(self._generated_output_label, 3, 1, 1, 5)
-        generator_layout.addWidget(QLabel("Preview"), 4, 0)
-        generator_layout.addWidget(self._generation_preview_label, 4, 1, 1, 5)
-        root_layout.addWidget(generator_group)
+        self._start_location_edit.setPlaceholderText("lat,lon or address")
+        self._end_location_edit.setPlaceholderText("lat,lon or address")
+        self._resolution_feedback_label.setWordWrap(True)
+        self._resolution_feedback_label.setStyleSheet("color: #5c5f52;")
+        generator_layout.addWidget(QLabel("Start Input"), 0, 0)
+        generator_layout.addWidget(self._start_location_edit, 0, 1, 1, 3)
+        generator_layout.addWidget(self._resolve_start_button, 0, 4)
+        generator_layout.addWidget(self._pick_start_button, 0, 5)
+        generator_layout.addWidget(QLabel("Start Lat"), 1, 0)
+        generator_layout.addWidget(self._start_lat_edit, 1, 1)
+        generator_layout.addWidget(QLabel("Start Lon"), 1, 2)
+        generator_layout.addWidget(self._start_lon_edit, 1, 3)
+        generator_layout.addWidget(QLabel("End Input"), 2, 0)
+        generator_layout.addWidget(self._end_location_edit, 2, 1, 1, 3)
+        generator_layout.addWidget(self._resolve_end_button, 2, 4)
+        generator_layout.addWidget(self._pick_end_button, 2, 5)
+        generator_layout.addWidget(QLabel("End Lat"), 3, 0)
+        generator_layout.addWidget(self._end_lat_edit, 3, 1)
+        generator_layout.addWidget(QLabel("End Lon"), 3, 2)
+        generator_layout.addWidget(self._end_lon_edit, 3, 3)
+        generator_layout.addWidget(QLabel("Resolve Status"), 4, 0)
+        generator_layout.addWidget(self._resolution_feedback_label, 4, 1, 1, 5)
+        generator_layout.addWidget(QLabel("Output File"), 5, 0)
+        generator_layout.addWidget(self._generator_output_edit, 5, 1, 1, 3)
+        generator_layout.addWidget(self._browse_generator_output_button, 5, 4)
+        generator_layout.addWidget(self._generate_button, 5, 5, 3, 1)
+        generator_layout.addWidget(QLabel("Last Output"), 6, 0)
+        generator_layout.addWidget(self._generated_output_label, 6, 1, 1, 4)
+        generator_layout.addWidget(QLabel("Preview"), 7, 0)
+        generator_layout.addWidget(self._generation_preview_label, 7, 1, 1, 4)
+        sidebar_layout.addWidget(generator_group)
 
-        controls_layout = QHBoxLayout()
-        controls_layout.addWidget(self._open_button)
-        controls_layout.addWidget(self._undo_button)
-        controls_layout.addWidget(self._redo_button)
-        controls_layout.addWidget(self._apply_smoothing_button)
-        controls_layout.addWidget(self._smoothed_view_toggle)
-        controls_layout.addWidget(self._color_by_speed_toggle)
-        controls_layout.addWidget(self._detect_anomalies_button)
-        controls_layout.addWidget(self._remove_anomalies_button)
-        controls_layout.addWidget(self._delete_button)
-        controls_layout.addWidget(self._reset_button)
-        controls_layout.addWidget(self._current_file_label, stretch=1)
-        root_layout.addLayout(controls_layout)
+        controls_group = QGroupBox("Viewer Controls")
+        controls_layout = QGridLayout(controls_group)
+        controls_layout.addWidget(self._open_button, 0, 0)
+        controls_layout.addWidget(self._undo_button, 0, 1)
+        controls_layout.addWidget(self._redo_button, 0, 2)
+        controls_layout.addWidget(self._apply_smoothing_button, 0, 3)
+        controls_layout.addWidget(self._smoothed_view_toggle, 1, 0, 1, 2)
+        controls_layout.addWidget(self._color_by_speed_toggle, 1, 2, 1, 2)
+        controls_layout.addWidget(self._detect_anomalies_button, 2, 0, 1, 2)
+        controls_layout.addWidget(self._remove_anomalies_button, 2, 2, 1, 2)
+        controls_layout.addWidget(self._delete_button, 3, 0, 1, 2)
+        controls_layout.addWidget(self._reset_button, 3, 2, 1, 2)
+        controls_layout.addWidget(QLabel("Current File"), 4, 0)
+        controls_layout.addWidget(self._current_file_label, 4, 1, 1, 3)
+        sidebar_layout.addWidget(controls_group)
 
         summary_group = QGroupBox("Summary")
         summary_layout = QFormLayout(summary_group)
@@ -150,7 +197,8 @@ class MainWindow(QMainWindow):
             value_label = QLabel("-")
             summary_layout.addRow(label_text, value_label)
             self._summary_labels[field_name] = value_label
-        root_layout.addWidget(summary_group)
+        sidebar_layout.addWidget(summary_group)
+        sidebar_layout.addStretch(1)
 
         self._table.setHorizontalHeaderLabels([header for header, _ in TABLE_COLUMNS])
         self._table.setAlternatingRowColors(True)
@@ -160,24 +208,39 @@ class MainWindow(QMainWindow):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._table.verticalHeader().setVisible(False)
 
-        content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        content_splitter.addWidget(self._map_view)
-        content_splitter.addWidget(self._table)
-        content_splitter.setStretchFactor(0, 3)
-        content_splitter.setStretchFactor(1, 4)
-        root_layout.addWidget(content_splitter, stretch=1)
+        sidebar_widget = QWidget()
+        sidebar_widget.setLayout(sidebar_layout)
+
+        home_splitter = QSplitter(Qt.Orientation.Horizontal)
+        home_splitter.addWidget(self._map_view)
+        home_splitter.addWidget(sidebar_widget)
+        home_splitter.setStretchFactor(0, 5)
+        home_splitter.setStretchFactor(1, 2)
+
+        workspace_splitter = QSplitter(Qt.Orientation.Vertical)
+        workspace_splitter.addWidget(home_splitter)
+        workspace_splitter.addWidget(self._table)
+        workspace_splitter.setStretchFactor(0, 3)
+        workspace_splitter.setStretchFactor(1, 2)
+        root_layout.addWidget(workspace_splitter, stretch=1)
 
         self.setCentralWidget(central_widget)
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("Map ready. Pick points, enter lat/lon, or search addresses.")
 
         self._browse_generator_output_button.clicked.connect(self.browse_generator_output_path)
         self._generate_button.clicked.connect(self.generate_track_from_inputs)
+        self._resolve_start_button.clicked.connect(self.resolve_start_input)
+        self._resolve_end_button.clicked.connect(self.resolve_end_input)
         self._pick_start_button.clicked.connect(self.toggle_pick_start_mode)
         self._pick_end_button.clicked.connect(self.toggle_pick_end_mode)
-        self._start_lat_edit.editingFinished.connect(self.refresh_generator_markers)
-        self._start_lon_edit.editingFinished.connect(self.refresh_generator_markers)
-        self._end_lat_edit.editingFinished.connect(self.refresh_generator_markers)
-        self._end_lon_edit.editingFinished.connect(self.refresh_generator_markers)
+        self._start_location_edit.returnPressed.connect(self.resolve_start_input)
+        self._end_location_edit.returnPressed.connect(self.resolve_end_input)
+        self._start_location_edit.editingFinished.connect(self._handle_start_location_editing_finished)
+        self._end_location_edit.editingFinished.connect(self._handle_end_location_editing_finished)
+        self._start_lat_edit.editingFinished.connect(self._handle_start_coordinate_editing_finished)
+        self._start_lon_edit.editingFinished.connect(self._handle_start_coordinate_editing_finished)
+        self._end_lat_edit.editingFinished.connect(self._handle_end_coordinate_editing_finished)
+        self._end_lon_edit.editingFinished.connect(self._handle_end_coordinate_editing_finished)
         self._open_button.clicked.connect(self.open_file_dialog)
         self._undo_button.clicked.connect(self.undo_last_edit)
         self._redo_button.clicked.connect(self.redo_last_edit)
@@ -191,6 +254,8 @@ class MainWindow(QMainWindow):
         self._table.itemSelectionChanged.connect(self._update_window_state)
         if hasattr(self._map_view, "mapClicked"):
             self._map_view.mapClicked.connect(self._handle_map_click)
+        if hasattr(self._map_view, "viewportChanged"):
+            self._map_view.viewportChanged.connect(self._handle_map_viewport_changed)
 
     def browse_generator_output_path(self) -> None:
         suggested_path = Path(self._generator_output_edit.text().strip() or self._default_generated_output_path())
@@ -203,15 +268,36 @@ class MainWindow(QMainWindow):
         if filename:
             self._generator_output_edit.setText(filename)
 
+    def resolve_start_input(self) -> None:
+        self._resolve_location_input("start")
+
+    def resolve_end_input(self) -> None:
+        self._resolve_location_input("end")
+
+    def _handle_start_location_editing_finished(self) -> None:
+        self._resolve_location_input("start")
+
+    def _handle_end_location_editing_finished(self) -> None:
+        self._resolve_location_input("end")
+
+    def _handle_start_coordinate_editing_finished(self) -> None:
+        self._handle_coordinate_editing_finished("start")
+
+    def _handle_end_coordinate_editing_finished(self) -> None:
+        self._handle_coordinate_editing_finished("end")
+
     def generate_track_from_inputs(self) -> None:
+        if not self._prepare_generator_inputs():
+            return
+
         try:
             start = (
-                self._parse_coordinate_value(self._start_lat_edit.text(), "Start latitude", -90.0, 90.0),
-                self._parse_coordinate_value(self._start_lon_edit.text(), "Start longitude", -180.0, 180.0),
+                parse_coordinate_value(self._start_lat_edit.text(), "Start latitude", -90.0, 90.0),
+                parse_coordinate_value(self._start_lon_edit.text(), "Start longitude", -180.0, 180.0),
             )
             end = (
-                self._parse_coordinate_value(self._end_lat_edit.text(), "End latitude", -90.0, 90.0),
-                self._parse_coordinate_value(self._end_lon_edit.text(), "End longitude", -180.0, 180.0),
+                parse_coordinate_value(self._end_lat_edit.text(), "End latitude", -90.0, 90.0),
+                parse_coordinate_value(self._end_lon_edit.text(), "End longitude", -180.0, 180.0),
             )
             output_path = Path(
                 self._generator_output_edit.text().strip()
@@ -243,6 +329,17 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"Generated track to {output_path}")
 
+    def _prepare_generator_inputs(self) -> bool:
+        if self._start_location_edit.text().strip():
+            if self._resolve_location_input("start") is None:
+                return False
+
+        if self._end_location_edit.text().strip():
+            if self._resolve_location_input("end") is None:
+                return False
+
+        return True
+
     def toggle_pick_start_mode(self, checked: bool) -> None:
         self._set_pick_mode("start" if checked else None)
 
@@ -250,11 +347,11 @@ class MainWindow(QMainWindow):
         self._set_pick_mode("end" if checked else None)
 
     def refresh_generator_markers(self) -> None:
-        start = self._try_parse_coordinate_pair(
+        start = try_parse_coordinate_pair(
             self._start_lat_edit.text(),
             self._start_lon_edit.text(),
         )
-        end = self._try_parse_coordinate_pair(
+        end = try_parse_coordinate_pair(
             self._end_lat_edit.text(),
             self._end_lon_edit.text(),
         )
@@ -262,19 +359,141 @@ class MainWindow(QMainWindow):
 
     def _handle_map_click(self, latitude: float, longitude: float) -> None:
         if self._active_pick_mode == "start":
-            self._start_lat_edit.setText(f"{latitude:.6f}")
-            self._start_lon_edit.setText(f"{longitude:.6f}")
+            formatted_latitude, formatted_longitude = format_coordinate_pair(latitude, longitude)
+            self._start_location_edit.setText(f"{formatted_latitude},{formatted_longitude}")
+            self._start_lat_edit.setText(formatted_latitude)
+            self._start_lon_edit.setText(formatted_longitude)
+            self._set_resolution_feedback(
+                f"Selected start from map -> ({latitude:.2f}, {longitude:.2f})"
+            )
             self.refresh_generator_markers()
             self._set_pick_mode(None)
             self.statusBar().showMessage("Start point selected from map")
             return
 
         if self._active_pick_mode == "end":
-            self._end_lat_edit.setText(f"{latitude:.6f}")
-            self._end_lon_edit.setText(f"{longitude:.6f}")
+            formatted_latitude, formatted_longitude = format_coordinate_pair(latitude, longitude)
+            self._end_location_edit.setText(f"{formatted_latitude},{formatted_longitude}")
+            self._end_lat_edit.setText(formatted_latitude)
+            self._end_lon_edit.setText(formatted_longitude)
+            self._set_resolution_feedback(
+                f"Selected end from map -> ({latitude:.2f}, {longitude:.2f})"
+            )
             self.refresh_generator_markers()
             self._set_pick_mode(None)
             self.statusBar().showMessage("End point selected from map")
+
+    def _apply_startup_map_view(self) -> None:
+        if hasattr(self._map_view, "set_home_view"):
+            self._map_view.set_home_view(self._startup_map_view)
+        self.refresh_generator_markers()
+
+    def _handle_map_viewport_changed(self, latitude: float, longitude: float, zoom: int) -> None:
+        self._startup_map_view = MapViewport(latitude=latitude, longitude=longitude, zoom=zoom)
+        try:
+            save_map_view(self._startup_map_view, path=self._map_state_path)
+        except OSError:
+            return
+
+    def _resolve_location_input(
+        self,
+        endpoint: str,
+    ) -> ResolvedLocationInput | None:
+        location_edit = self._location_input_edit(endpoint)
+        query = location_edit.text().strip()
+        if not query:
+            return None
+
+        try:
+            resolved_location = resolve_location_text(query, self._geocoder)
+        except (GeocodingError, ValueError) as exc:
+            self._set_resolution_feedback(
+                format_resolution_error(endpoint, str(exc)),
+                is_error=True,
+            )
+            return None
+
+        self._apply_resolved_location(endpoint, resolved_location)
+        return resolved_location
+
+    def _handle_coordinate_editing_finished(self, endpoint: str) -> None:
+        latitude_edit, longitude_edit = self._coordinate_edits(endpoint)
+        try:
+            latitude = parse_coordinate_value(latitude_edit.text(), "Latitude", -90.0, 90.0)
+            longitude = parse_coordinate_value(longitude_edit.text(), "Longitude", -180.0, 180.0)
+        except ValueError as exc:
+            self._set_resolution_feedback(
+                format_resolution_error(endpoint, str(exc)),
+                is_error=True,
+            )
+            return
+
+        formatted_latitude, formatted_longitude = format_coordinate_pair(latitude, longitude)
+        self._location_input_edit(endpoint).setText(f"{formatted_latitude},{formatted_longitude}")
+        self._center_map_on_location(latitude, longitude)
+        self.refresh_generator_markers()
+        self._set_resolution_feedback(
+            format_resolution_feedback(
+                ResolvedLocationInput(
+                    latitude=latitude,
+                    longitude=longitude,
+                    source="coordinates",
+                    query=f"{formatted_latitude},{formatted_longitude}",
+                )
+            )
+        )
+
+    def _apply_resolved_location(
+        self,
+        endpoint: str,
+        resolved_location: ResolvedLocationInput,
+    ) -> None:
+        latitude_edit, longitude_edit = self._coordinate_edits(endpoint)
+        location_edit = self._location_input_edit(endpoint)
+        formatted_latitude, formatted_longitude = format_coordinate_pair(
+            resolved_location.latitude,
+            resolved_location.longitude,
+        )
+        location_edit.setText(
+            resolved_location.query
+            if resolved_location.source == "address"
+            else f"{formatted_latitude},{formatted_longitude}"
+        )
+        latitude_edit.setText(formatted_latitude)
+        longitude_edit.setText(formatted_longitude)
+        self._center_map_on_location(
+            resolved_location.latitude,
+            resolved_location.longitude,
+        )
+        self.refresh_generator_markers()
+        self._set_resolution_feedback(format_resolution_feedback(resolved_location))
+
+    def _center_map_on_location(self, latitude: float, longitude: float) -> None:
+        zoom = max(self._startup_map_view.zoom, 14)
+        self._startup_map_view = MapViewport(latitude=latitude, longitude=longitude, zoom=zoom)
+        if hasattr(self._map_view, "set_home_view"):
+            self._map_view.set_home_view(self._startup_map_view)
+        try:
+            save_map_view(self._startup_map_view, path=self._map_state_path)
+        except OSError:
+            return
+
+    def _location_input_edit(self, endpoint: str) -> QLineEdit:
+        if endpoint == "start":
+            return self._start_location_edit
+        return self._end_location_edit
+
+    def _coordinate_edits(self, endpoint: str) -> tuple[QLineEdit, QLineEdit]:
+        if endpoint == "start":
+            return self._start_lat_edit, self._start_lon_edit
+        return self._end_lat_edit, self._end_lon_edit
+
+    def _set_resolution_feedback(self, message: str, *, is_error: bool = False) -> None:
+        self._resolution_feedback_label.setText(message)
+        self._resolution_feedback_label.setStyleSheet(
+            "color: #9f1d35;" if is_error else "color: #0f5132;"
+        )
+        self.statusBar().showMessage(message)
 
     def _set_pick_mode(self, mode: str | None) -> None:
         self._active_pick_mode = mode
@@ -298,12 +517,12 @@ class MainWindow(QMainWindow):
         end: tuple[float, float] | None = None,
     ) -> None:
         if start is None:
-            start = self._try_parse_coordinate_pair(
+            start = try_parse_coordinate_pair(
                 self._start_lat_edit.text(),
                 self._start_lon_edit.text(),
             )
         if end is None:
-            end = self._try_parse_coordinate_pair(
+            end = try_parse_coordinate_pair(
                 self._end_lat_edit.text(),
                 self._end_lon_edit.text(),
             )
@@ -722,37 +941,3 @@ class MainWindow(QMainWindow):
 
     def _default_generated_output_path(self) -> Path:
         return Path.cwd() / "output" / "generated_track.nmea"
-
-    def _parse_coordinate_value(
-        self,
-        value: str,
-        label: str,
-        minimum: float,
-        maximum: float,
-    ) -> float:
-        text = value.strip()
-        if not text:
-            raise ValueError(f"{label} is required.")
-
-        try:
-            parsed = float(text)
-        except ValueError as exc:
-            raise ValueError(f"{label} must be a valid number.") from exc
-
-        if not minimum <= parsed <= maximum:
-            raise ValueError(f"{label} must be in [{minimum}, {maximum}].")
-
-        return parsed
-
-    def _try_parse_coordinate_pair(
-        self,
-        latitude_text: str,
-        longitude_text: str,
-    ) -> tuple[float, float] | None:
-        try:
-            latitude = self._parse_coordinate_value(latitude_text, "Latitude", -90.0, 90.0)
-            longitude = self._parse_coordinate_value(longitude_text, "Longitude", -180.0, 180.0)
-        except ValueError:
-            return None
-
-        return latitude, longitude

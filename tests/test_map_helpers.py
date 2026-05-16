@@ -4,6 +4,7 @@ import unittest
 
 from core.pipeline import TrackResult
 from core.track_model import TrackPoint, TrackSegment, TrackSummary
+from gui.generator_home import MapViewport
 from gui.presentation import build_map_html, build_map_payload
 
 
@@ -52,8 +53,9 @@ class MapHelperTests(unittest.TestCase):
         self.assertEqual(payload["invalid_points"][0]["reason"], "jump point")
 
     def test_build_map_html_contains_track_markers_and_empty_state(self) -> None:
-        empty_html = build_map_html(None)
-        self.assertIn("Open an NMEA file to view the track.", empty_html)
+        empty_html = build_map_html(None, home_view=MapViewport(latitude=31.2304, longitude=121.4737, zoom=12))
+        self.assertIn("Pick start and end on the map, enter lat/lon, or search addresses to begin.", empty_html)
+        self.assertIn('"home_view":{"lat":31.2304,"lon":121.4737,"zoom":12}', empty_html)
 
         result = TrackResult(
             points=[
@@ -92,6 +94,7 @@ class MapHelperTests(unittest.TestCase):
             picked_start=(39.9042, 116.4074),
             picked_end=(39.9142, 116.4274),
             active_pick_mode="start",
+            home_view=MapViewport(latitude=39.9, longitude=116.4, zoom=10),
         )
 
         self.assertEqual(payload["picked_start_point"]["label"], "Selected Start")
@@ -99,6 +102,7 @@ class MapHelperTests(unittest.TestCase):
         self.assertEqual(payload["active_pick_mode"], "start")
         self.assertAlmostEqual(payload["picked_start_point"]["lat"], 39.9042, places=6)
         self.assertAlmostEqual(payload["picked_end_point"]["lon"], 116.4274, places=6)
+        self.assertEqual(payload["home_view"]["zoom"], 10)
 
     def test_build_map_html_contains_pick_mode_and_selected_marker_labels(self) -> None:
         html = build_map_html(

@@ -6,6 +6,7 @@ from typing import Literal
 from core.geo import calc_speed_kmh, haversine_m
 from core.pipeline import TrackResult
 from core.track_model import TrackPoint, TrackSegment, TrackSummary, time_str_to_seconds
+from gui.generator_home import DEFAULT_MAP_VIEW, MapViewport
 
 LOW_SPEED_COLOR = (32, 105, 211)
 HIGH_SPEED_COLOR = (215, 38, 61)
@@ -89,6 +90,7 @@ def build_map_payload(
     picked_start: tuple[float, float] | None = None,
     picked_end: tuple[float, float] | None = None,
     active_pick_mode: Literal["start", "end"] | None = None,
+    home_view: MapViewport = DEFAULT_MAP_VIEW,
 ) -> dict[str, object]:
     if result is None:
         return {
@@ -102,6 +104,8 @@ def build_map_payload(
             "picked_end_point": _picked_point_payload(picked_end, label="Selected End"),
             "active_pick_mode": active_pick_mode,
             "color_by_speed": color_by_speed,
+            "home_view": home_view.to_payload(),
+            "startup_message": "Pick start and end on the map, enter lat/lon, or search addresses to begin.",
         }
 
     polylines: list[list[list[float]]] = []
@@ -207,6 +211,8 @@ def build_map_payload(
         "picked_end_point": _picked_point_payload(picked_end, label="Selected End"),
         "active_pick_mode": active_pick_mode,
         "color_by_speed": color_by_speed,
+        "home_view": home_view.to_payload(),
+        "startup_message": "Pick start and end on the map, enter lat/lon, or search addresses to begin.",
     }
 
 
@@ -218,6 +224,7 @@ def build_map_html(
     picked_start: tuple[float, float] | None = None,
     picked_end: tuple[float, float] | None = None,
     active_pick_mode: Literal["start", "end"] | None = None,
+    home_view: MapViewport = DEFAULT_MAP_VIEW,
 ) -> str:
     payload = build_map_payload(
         result,
@@ -226,6 +233,7 @@ def build_map_html(
         picked_start=picked_start,
         picked_end=picked_end,
         active_pick_mode=active_pick_mode,
+        home_view=home_view,
     )
     payload_json = json.dumps(payload, separators=(",", ":"))
 
@@ -273,11 +281,26 @@ def build_map_html(
       letter-spacing: 0.02em;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
     }}
+    .map-home-hint {{
+      position: absolute;
+      z-index: 900;
+      left: 12px;
+      bottom: 12px;
+      max-width: 320px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255, 250, 240, 0.92);
+      color: #2e3128;
+      font-size: 13px;
+      line-height: 1.45;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    }}
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div id="pick-banner" class="map-pick-banner" style="display:none;"></div>
+  <div id="home-hint" class="map-home-hint" style="display:none;"></div>
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
@@ -288,7 +311,22 @@ def build_map_html(
     const trackData = {payload_json};
     const mapElement = document.getElementById("map");
     const pickBanner = document.getElementById("pick-banner");
+    const homeHint = document.getElementById("home-hint");
+    let map = null;
     let mapBridge = null;
+
+    function hasVisibleData() {{
+      return (
+        trackData.polylines.length > 0 ||
+        trackData.speed_polylines.length > 0 ||
+        trackData.invalid_points.length > 0 ||
+        trackData.anomaly_points.length > 0 ||
+        !!trackData.start_point ||
+        !!trackData.end_point ||
+        !!trackData.picked_start_point ||
+        !!trackData.picked_end_point
+      );
+    }}
 
     function updatePickBanner(activePickMode) {{
       if (!activePickMode) {{
@@ -302,27 +340,37 @@ def build_map_html(
       pickBanner.style.display = "block";
     }}
 
+    function updateHomeHint() {{
+      if (hasVisibleData()) {{
+        homeHint.style.display = "none";
+        homeHint.textContent = "";
+        return;
+      }}
+
+      homeHint.textContent = trackData.startup_message || "";
+      homeHint.style.display = trackData.startup_message ? "block" : "none";
+    }}
+
+    function syncMapViewport() {{
+      if (!map || !mapBridge || !mapBridge.reportViewportChange) {{
+        return;
+      }}
+
+      const center = map.getCenter();
+      mapBridge.reportViewportChange(center.lat, center.lng, map.getZoom());
+    }}
+
     if (window.qt && window.qt.webChannelTransport && window.QWebChannel) {{
       new QWebChannel(window.qt.webChannelTransport, function(channel) {{
         mapBridge = channel.objects.mapBridge || null;
+        syncMapViewport();
       }});
     }}
 
     if (!window.L) {{
       mapElement.innerHTML = '<div class="map-empty">Leaflet failed to load.</div>';
-    }} else if (
-      trackData.polylines.length === 0 &&
-      trackData.speed_polylines.length === 0 &&
-      trackData.invalid_points.length === 0 &&
-      trackData.anomaly_points.length === 0 &&
-      !trackData.start_point &&
-      !trackData.end_point &&
-      !trackData.picked_start_point &&
-      !trackData.picked_end_point
-    ) {{
-      mapElement.innerHTML = '<div class="map-empty">Open an NMEA file to view the track.</div>';
     }} else {{
-      const map = L.map("map", {{
+      map = L.map("map", {{
         zoomControl: true,
         preferCanvas: true
       }});
@@ -334,12 +382,14 @@ def build_map_html(
 
       const bounds = [];
       updatePickBanner(trackData.active_pick_mode);
+      updateHomeHint();
 
       map.on("click", function(event) {{
         if (mapBridge && mapBridge.reportMapClick) {{
           mapBridge.reportMapClick(event.latlng.lat, event.latlng.lng);
         }}
       }});
+      map.on("moveend", syncMapViewport);
 
       if (trackData.color_by_speed && trackData.speed_polylines.length > 0) {{
         for (const segment of trackData.speed_polylines) {{
@@ -443,8 +493,13 @@ def build_map_html(
           padding: [20, 20]
         }});
       }} else {{
-        map.setView([0, 0], 2);
+        map.setView(
+          [trackData.home_view.lat, trackData.home_view.lon],
+          trackData.home_view.zoom
+        );
       }}
+
+      syncMapViewport();
     }}
   </script>
 </body>
