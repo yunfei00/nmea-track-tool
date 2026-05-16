@@ -65,16 +65,43 @@ jobs:
         shell: pwsh
         run: |
           python -c "from PySide6.QtWebEngineWidgets import QWebEngineView; from gui.main_window import MainWindow; print('GUI imports OK')"
-          python -m PyInstaller --clean --onedir --windowed --name nmea-track-tool --collect-all PySide6 gui\app.py
+          $pySide6Dir = python -c "from pathlib import Path; import PySide6; print(Path(PySide6.__file__).resolve().parent)"
+          python -m PyInstaller `
+            --clean `
+            --onedir `
+            --windowed `
+            --name nmea-track-tool `
+            --collect-all PySide6 `
+            --add-data "$pySide6Dir\resources;PySide6\resources" `
+            gui\app.py
           $packageDir = "release\$env:TRACK_PACKAGE_NAME"
           New-Item -ItemType Directory -Force $packageDir | Out-Null
           Copy-Item -Path dist\nmea-track-tool\* -Destination $packageDir -Recurse -Force
+          if (-not (Test-Path "$packageDir\_internal\PySide6\resources\qtwebengine_resources.pak")) {
+            throw "Qt WebEngine resources were not packaged"
+          }
           Copy-Item -LiteralPath gui\PACKAGE_README.txt -Destination "$packageDir\README.txt" -Force
           New-Item -ItemType Directory -Force "$packageDir\sample_data" | Out-Null
           Copy-Item -LiteralPath sample_data\clean_track.nmea -Destination "$packageDir\sample_data\clean_track.nmea" -Force
           Copy-Item -LiteralPath sample_data\anomaly_track.nmea -Destination "$packageDir\sample_data\anomaly_track.nmea" -Force
           Copy-Item -LiteralPath sample_data\noisy_track.nmea -Destination "$packageDir\sample_data\noisy_track.nmea" -Force
           Get-Item "$packageDir\nmea-track-tool.exe"
+
+      - name: Smoke test packaged track tool EXE
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $process = Start-Process `
+            -FilePath "release\$env:TRACK_PACKAGE_NAME\nmea-track-tool.exe" `
+            -ArgumentList "--smoke-test" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            Get-ChildItem "release\$env:TRACK_PACKAGE_NAME" -Filter "*.startup.log" | ForEach-Object {
+              Get-Content $_.FullName
+            }
+            throw "Packaged NMEA track tool failed smoke test with exit code $($process.ExitCode)"
+          }
 
       - name: Create ZIP packages
         shell: pwsh
