@@ -46,11 +46,11 @@ jobs:
       - name: Build UMT converter package files
         shell: pwsh
         run: |
-          python -m PyInstaller --clean --onedir --name umt-to-nmea tools\umt_to_nmea\umt_to_nmea.py
+          python -m PyInstaller --clean --onefile --name umt-to-nmea tools\umt_to_nmea\umt_to_nmea.py
           New-Item -ItemType Directory -Force release | Out-Null
           $packageDir = "release\$env:UMT_PACKAGE_NAME"
           New-Item -ItemType Directory -Force $packageDir | Out-Null
-          Copy-Item -Path dist\umt-to-nmea\* -Destination $packageDir -Recurse -Force
+          Copy-Item -LiteralPath dist\umt-to-nmea.exe -Destination "$packageDir\umt-to-nmea.exe" -Force
           Copy-Item -LiteralPath tools\umt_to_nmea\PACKAGE_README.txt -Destination "$packageDir\README.txt" -Force
           New-Item -ItemType Directory -Force "$packageDir\sample_data" | Out-Null
           Copy-Item -LiteralPath sample_data\xidantot3.umt -Destination "$packageDir\sample_data\xidantot3.umt" -Force
@@ -68,7 +68,7 @@ jobs:
           $pySide6Dir = python -c "from pathlib import Path; import PySide6; print(Path(PySide6.__file__).resolve().parent)"
           python -m PyInstaller `
             --clean `
-            --onedir `
+            --onefile `
             --windowed `
             --name nmea-track-tool `
             --collect-all PySide6 `
@@ -76,10 +76,7 @@ jobs:
             gui\app.py
           $packageDir = "release\$env:TRACK_PACKAGE_NAME"
           New-Item -ItemType Directory -Force $packageDir | Out-Null
-          Copy-Item -Path dist\nmea-track-tool\* -Destination $packageDir -Recurse -Force
-          if (-not (Test-Path "$packageDir\_internal\PySide6\resources\qtwebengine_resources.pak")) {
-            throw "Qt WebEngine resources were not packaged"
-          }
+          Copy-Item -LiteralPath dist\nmea-track-tool.exe -Destination "$packageDir\nmea-track-tool.exe" -Force
           Copy-Item -LiteralPath gui\PACKAGE_README.txt -Destination "$packageDir\README.txt" -Force
           New-Item -ItemType Directory -Force "$packageDir\sample_data" | Out-Null
           Copy-Item -LiteralPath sample_data\clean_track.nmea -Destination "$packageDir\sample_data\clean_track.nmea" -Force
@@ -106,8 +103,8 @@ jobs:
       - name: Create ZIP packages
         shell: pwsh
         run: |
-          Compress-Archive -Path "release\$env:UMT_PACKAGE_NAME" -DestinationPath "release\$env:UMT_ASSET_NAME" -Force
-          Compress-Archive -Path "release\$env:TRACK_PACKAGE_NAME" -DestinationPath "release\$env:TRACK_ASSET_NAME" -Force
+          Compress-Archive -Path "release\$env:UMT_PACKAGE_NAME\*" -DestinationPath "release\$env:UMT_ASSET_NAME" -Force
+          Compress-Archive -Path "release\$env:TRACK_PACKAGE_NAME\*" -DestinationPath "release\$env:TRACK_ASSET_NAME" -Force
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

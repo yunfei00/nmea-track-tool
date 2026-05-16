@@ -1,7 +1,8 @@
 NMEA Track Tool
 ===============
 
-This package contains the Windows desktop track viewer and editor.
+This package contains the Windows desktop track viewer and editor as a
+single executable plus sample data.
 
 Run:
 

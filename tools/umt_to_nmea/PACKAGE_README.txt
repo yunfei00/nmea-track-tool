@@ -1,7 +1,8 @@
 UMT to NMEA converter
 =====================
 
-This package contains the Windows command-line converter for UMT files.
+This package contains the Windows command-line converter for UMT files as a
+single executable plus sample data.
 
 The converter is not a double-click GUI app. Run it from PowerShell or
 Command Prompt with an input file and an output path.
