@@ -37,5 +37,10 @@
 
 ## CI/CD
 
-- Push 到 `main` / `master` / `dev` 会自动执行测试与构建，并上传 Windows 可执行文件 artifact。
+- Push 到 `main` / `master` / `dev` 会自动执行测试与构建，打包 `dist-release/*.zip`，并上传以下 GitHub Actions Artifacts（保留 7 天）：
+  - `nmea-track-tool-windows-x64-${{ github.sha }}`
+  - `umt-to-nmea-windows-x64-${{ github.sha }}`
+  - `nmea-slimmer-windows-x64-${{ github.sha }}`
+- Push 构建后下载 Artifacts：进入 GitHub 仓库页面 → **Actions** → 选择对应 workflow run → 页面下方 **Artifacts** 区域下载。
 - 推送 `v*` 标签（如 `v1.0.0`）会自动执行测试与构建、打包 ZIP、创建 GitHub Release，并仅上传包含可执行文件的 `.zip` 资产。
+- Tag 构建后下载 Release Assets：进入 GitHub 仓库页面 → **Releases** → 打开对应 tag 的 release → 在 **Assets** 中下载 `.zip` 文件。

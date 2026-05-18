@@ -36,28 +36,49 @@ jobs:
       - name: Package ZIP artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist-build | Out-Null
+          $sha = "${{ github.sha }}"
+          New-Item -ItemType Directory -Force -Path dist-release | Out-Null
 
           New-Item -ItemType Directory -Force -Path build-zip/nmea-track-tool | Out-Null
           Copy-Item dist/nmea-track-tool.exe build-zip/nmea-track-tool/
           Copy-Item README.md build-zip/nmea-track-tool/
           if (Test-Path sample_data) { Copy-Item sample_data build-zip/nmea-track-tool/sample_data -Recurse }
-          Compress-Archive -Path build-zip/nmea-track-tool/* -DestinationPath "dist-build/nmea-track-tool-windows-x64-dev.zip" -Force
+          Compress-Archive -Path build-zip/nmea-track-tool/* -DestinationPath "dist-release/nmea-track-tool-windows-x64-$sha.zip" -Force
 
           New-Item -ItemType Directory -Force -Path build-zip/umt-to-nmea | Out-Null
           Copy-Item dist/umt-to-nmea.exe build-zip/umt-to-nmea/
           Copy-Item tools/umt_to_nmea/README.md build-zip/umt-to-nmea/
           if (Test-Path sample_data/xidantot3.umt) { Copy-Item sample_data/xidantot3.umt build-zip/umt-to-nmea/ }
-          Compress-Archive -Path build-zip/umt-to-nmea/* -DestinationPath "dist-build/umt-to-nmea-windows-x64-dev.zip" -Force
+          Compress-Archive -Path build-zip/umt-to-nmea/* -DestinationPath "dist-release/umt-to-nmea-windows-x64-$sha.zip" -Force
 
           New-Item -ItemType Directory -Force -Path build-zip/nmea-slimmer | Out-Null
           Copy-Item dist/nmea-slimmer.exe build-zip/nmea-slimmer/
           Copy-Item README.md build-zip/nmea-slimmer/
-          Compress-Archive -Path build-zip/nmea-slimmer/* -DestinationPath "dist-build/nmea-slimmer-windows-x64-dev.zip" -Force
+          Compress-Archive -Path build-zip/nmea-slimmer/* -DestinationPath "dist-release/nmea-slimmer-windows-x64-$sha.zip" -Force
 
-      - name: Upload build artifacts
+      - name: Upload nmea-track-tool artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-zip-packages
-          path: dist-build/*.zip
+          name: nmea-track-tool-windows-x64-${{ github.sha }}
+          path: dist-release/nmea-track-tool-windows-x64-${{ github.sha }}.zip
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload umt-to-nmea artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: umt-to-nmea-windows-x64-${{ github.sha }}
+          path: dist-release/umt-to-nmea-windows-x64-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload nmea-slimmer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nmea-slimmer-windows-x64-${{ github.sha }}
+          path: dist-release/nmea-slimmer-windows-x64-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Confirm artifact upload
+        run: echo "Artifacts uploaded successfully"
