@@ -5,32 +5,56 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
-  build-windows:
+  release-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Test
+
+      - name: Run tests
         run: pytest
+
       - name: Build EXE
         run: pyinstaller --noconfirm --onefile --name nmea-slimmer src/nmea_slimmer/app.py
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nmea-slimmer-windows
+          path: dist/nmea-slimmer.exe
+          if-no-files-found: error
+
+      - name: Download EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nmea-slimmer-windows
+          path: dist
+
       - name: Package ZIP
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
+          $zipName = "nmea-slimmer-${{ github.ref_name }}-windows.zip"
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item dist/nmea-slimmer.exe release/
           Copy-Item README.md release/
           if (Test-Path sample_data) { Copy-Item sample_data release/sample_data -Recurse }
-          Compress-Archive -Path release/* -DestinationPath nmea-slimmer-$tag-windows.zip -Force
-      - name: Create Release
+          Compress-Archive -Path release/* -DestinationPath $zipName -Force
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: nmea-slimmer-${{ github.ref_name }}-windows.zip
+          files: |
+            dist/nmea-slimmer.exe
+            nmea-slimmer-${{ github.ref_name }}-windows.zip
