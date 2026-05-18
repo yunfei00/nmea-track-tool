@@ -1,4 +1,5 @@
 from src.nmea_slimmer.checksum import compute_checksum, with_checksum
+from src.nmea_slimmer.app import main
 from src.nmea_slimmer.slim_engine import SlimOptions, extract_nmea_sentences, slim_lines
 
 
@@ -109,3 +110,9 @@ def test_slim_concatenated_keep_and_drop_behavior():
     assert any("$GNRMC" in s for s in out)
     assert any("$GNGSA" in s for s in out)
     assert any("$GPGSV" in s for s in out)
+
+
+def test_app_smoke_test_mode_exits(monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+
+    assert main(["--smoke-test"]) == 0

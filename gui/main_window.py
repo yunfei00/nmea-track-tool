@@ -469,8 +469,7 @@ class MainWindow(QMainWindow):
         self._set_resolution_feedback(format_resolution_feedback(resolved_location))
 
     def _center_map_on_location(self, latitude: float, longitude: float) -> None:
-        zoom = max(self._startup_map_view.zoom, 14)
-        self._startup_map_view = MapViewport(latitude=latitude, longitude=longitude, zoom=zoom)
+        self._startup_map_view = MapViewport(latitude=latitude, longitude=longitude, zoom=14)
         if hasattr(self._map_view, "set_home_view"):
             self._map_view.set_home_view(self._startup_map_view)
         try:
