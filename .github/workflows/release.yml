@@ -32,7 +32,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --onefile --name nmea-track-tool gui/app.py
           pyinstaller --noconfirm --onefile --name umt-to-nmea tools/umt_to_nmea/umt_to_nmea.py
-          pyinstaller --noconfirm --onefile --name nmea-slimmer --hidden-import PySide6.QtWidgets --hidden-import PySide6.QtCore --hidden-import PySide6.QtGui scripts/run_nmea_slimmer.py
+          pyinstaller --noconfirm --onefile --windowed --name nmea-slimmer scripts/run_nmea_slimmer.py
 
       - name: Package release ZIP files
         shell: pwsh
