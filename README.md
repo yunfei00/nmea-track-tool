@@ -22,7 +22,7 @@
 ## 使用步骤
 
 1. 安装依赖：`pip install -r requirements.txt`
-2. 启动：`python -m src.nmea_slimmer.app`
+2. 启动：`python -m nmea_slimmer`
 3. 选择输入文件（支持 `.nmea/.txt/.log/.csv`）
 4. 设置输出路径与规则
 5. 点击“开始精简”
