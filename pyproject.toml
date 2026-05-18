@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nmea-track-tool"
+version = "0.1.0"
+description = "NMEA track tools"
+requires-python = ">=3.11"
+dependencies = [
+  "PySide6",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nmea_slimmer*"]
