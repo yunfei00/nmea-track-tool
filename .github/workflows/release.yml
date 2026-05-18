@@ -1,146 +1,36 @@
-name: Release Windows ZIP Package
+name: Release
 
 on:
   push:
     tags:
-      - "*"
-  workflow_dispatch:
-
-permissions:
-  contents: write
+      - 'v*'
 
 jobs:
-  build-windows-package:
-    name: Build and publish Windows ZIP package
+  build-windows:
     runs-on: windows-latest
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Prepare release asset name
-        shell: pwsh
-        run: |
-          $safeTag = "${{ github.ref_name }}" -replace "[^A-Za-z0-9._-]", "-"
-          "UMT_PACKAGE_NAME=umt-to-nmea-windows-x64-$safeTag" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "UMT_ASSET_NAME=umt-to-nmea-windows-x64-$safeTag.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "TRACK_PACKAGE_NAME=nmea-track-tool-windows-x64-$safeTag" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "TRACK_ASSET_NAME=nmea-track-tool-windows-x64-$safeTag.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Smoke test converter with Python
-        shell: pwsh
-        run: |
-          python tools\umt_to_nmea\umt_to_nmea.py sample_data\xidantot3.umt -o build\smoke-python.nmea --time-start 0 --time-end 1
-
-      - name: Install build dependencies
-        shell: pwsh
+          python-version: '3.11'
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller PySide6
-
-      - name: Build UMT converter package files
+          pip install -r requirements.txt
+      - name: Test
+        run: pytest
+      - name: Build EXE
+        run: pyinstaller --noconfirm --onefile --name nmea-slimmer src/nmea_slimmer/app.py
+      - name: Package ZIP
         shell: pwsh
         run: |
-          python -m PyInstaller --clean --onefile --name umt-to-nmea tools\umt_to_nmea\umt_to_nmea.py
-          New-Item -ItemType Directory -Force release | Out-Null
-          $packageDir = "release\$env:UMT_PACKAGE_NAME"
-          New-Item -ItemType Directory -Force $packageDir | Out-Null
-          Copy-Item -LiteralPath dist\umt-to-nmea.exe -Destination "$packageDir\umt-to-nmea.exe" -Force
-          Copy-Item -LiteralPath tools\umt_to_nmea\PACKAGE_README.txt -Destination "$packageDir\README.txt" -Force
-          New-Item -ItemType Directory -Force "$packageDir\sample_data" | Out-Null
-          Copy-Item -LiteralPath sample_data\xidantot3.umt -Destination "$packageDir\sample_data\xidantot3.umt" -Force
-
-      - name: Smoke test packaged EXE
-        shell: pwsh
-        run: |
-          & "release\$env:UMT_PACKAGE_NAME\umt-to-nmea.exe" "release\$env:UMT_PACKAGE_NAME\sample_data\xidantot3.umt" -o build\smoke-exe.nmea --time-start 0 --time-end 1
-          Get-Item build\smoke-exe.nmea
-
-      - name: Build NMEA track tool package files
-        shell: pwsh
-        run: |
-          python -c "from PySide6.QtWebEngineWidgets import QWebEngineView; from gui.main_window import MainWindow; print('GUI imports OK')"
-          $pySide6Dir = python -c "from pathlib import Path; import PySide6; print(Path(PySide6.__file__).resolve().parent)"
-          python -m PyInstaller `
-            --clean `
-            --onefile `
-            --windowed `
-            --name nmea-track-tool `
-            --collect-all PySide6 `
-            --add-data "$pySide6Dir\resources;PySide6\resources" `
-            gui\app.py
-          $packageDir = "release\$env:TRACK_PACKAGE_NAME"
-          New-Item -ItemType Directory -Force $packageDir | Out-Null
-          Copy-Item -LiteralPath dist\nmea-track-tool.exe -Destination "$packageDir\nmea-track-tool.exe" -Force
-          Copy-Item -LiteralPath gui\PACKAGE_README.txt -Destination "$packageDir\README.txt" -Force
-          New-Item -ItemType Directory -Force "$packageDir\sample_data" | Out-Null
-          Copy-Item -LiteralPath sample_data\clean_track.nmea -Destination "$packageDir\sample_data\clean_track.nmea" -Force
-          Copy-Item -LiteralPath sample_data\anomaly_track.nmea -Destination "$packageDir\sample_data\anomaly_track.nmea" -Force
-          Copy-Item -LiteralPath sample_data\noisy_track.nmea -Destination "$packageDir\sample_data\noisy_track.nmea" -Force
-          Get-Item "$packageDir\nmea-track-tool.exe"
-
-      - name: Smoke test packaged track tool EXE
-        shell: pwsh
-        run: |
-          $env:QT_QPA_PLATFORM = "offscreen"
-          $process = Start-Process `
-            -FilePath "release\$env:TRACK_PACKAGE_NAME\nmea-track-tool.exe" `
-            -ArgumentList "--smoke-test" `
-            -Wait `
-            -PassThru
-          if ($process.ExitCode -ne 0) {
-            Get-ChildItem "release\$env:TRACK_PACKAGE_NAME" -Filter "*.startup.log" | ForEach-Object {
-              Get-Content $_.FullName
-            }
-            throw "Packaged NMEA track tool failed smoke test with exit code $($process.ExitCode)"
-          }
-
-      - name: Create ZIP packages
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "release\$env:UMT_PACKAGE_NAME\*" -DestinationPath "release\$env:UMT_ASSET_NAME" -Force
-          Compress-Archive -Path "release\$env:TRACK_PACKAGE_NAME\*" -DestinationPath "release\$env:TRACK_ASSET_NAME" -Force
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+          $tag = "${{ github.ref_name }}"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item dist/nmea-slimmer.exe release/
+          Copy-Item README.md release/
+          if (Test-Path sample_data) { Copy-Item sample_data release/sample_data -Recurse }
+          Compress-Archive -Path release/* -DestinationPath nmea-slimmer-$tag-windows.zip -Force
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: windows-zip-packages
-          path: |
-            release/${{ env.UMT_ASSET_NAME }}
-            release/${{ env.TRACK_ASSET_NAME }}
-          if-no-files-found: error
-
-      - name: Publish ZIP packages to GitHub Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.ref_name }}
-        run: |
-          $assetPaths = @(
-            "release\$env:UMT_ASSET_NAME",
-            "release\$env:TRACK_ASSET_NAME"
-          )
-          gh release view $env:TAG_NAME *> $null
-          $releaseExists = $LASTEXITCODE -eq 0
-
-          if ($releaseExists) {
-            $existingAssets = gh release view $env:TAG_NAME --json assets --jq ".assets[].name"
-            $legacyAssetNames = @(
-              "$env:UMT_PACKAGE_NAME.exe",
-              "$env:TRACK_PACKAGE_NAME.exe"
-            )
-            foreach ($legacyAssetName in $legacyAssetNames) {
-              if ($existingAssets -contains $legacyAssetName) {
-                gh release delete-asset $env:TAG_NAME $legacyAssetName -y
-              }
-            }
-            gh release upload $env:TAG_NAME @assetPaths --clobber
-          } else {
-            gh release create $env:TAG_NAME @assetPaths --title $env:TAG_NAME --notes "Windows ZIP packages for $env:TAG_NAME."
-          }
+          files: nmea-slimmer-${{ github.ref_name }}-windows.zip
