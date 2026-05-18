@@ -33,3 +33,9 @@
 - 可选将 talker 统一转换为 `GP`，并重算 checksum。
 - 可选 GSV 降频；当启用时按时间桶控制，并尽量保留同一时刻完整组。
 - 原始文件不会被覆盖（默认另存）。
+
+
+## CI/CD
+
+- Push 到 `main` / `master` / `dev` 会自动执行测试与构建，并上传 Windows 可执行文件 artifact。
+- 推送 `v*` 标签（如 `v1.0.0`）会自动执行测试与构建、打包 ZIP、创建 GitHub Release，并上传 `.exe` 与 `.zip` 资产。
