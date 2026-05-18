@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Dict
 
 from .checksum import with_checksum
@@ -25,10 +26,14 @@ class SlimOptions:
 @dataclass
 class SlimStats:
     total_lines: int = 0
+    physical_lines: int = 0
     kept_lines: int = 0
     dropped_lines: int = 0
     non_nmea_lines: int = 0
     unknown_sentences: int = 0
+    extracted_sentences: int = 0
+    concatenated_sentence_lines: int = 0
+    no_checksum_sentences: int = 0
     by_type: Dict[str, int] = field(default_factory=dict)
     output_path: str = ""
     input_size: int = 0
@@ -44,6 +49,54 @@ def _nmea_seconds(parsed_body: str) -> int | None:
         return None
     hh, mm, ss = int(t[0:2]), int(t[2:4]), int(t[4:6])
     return hh * 3600 + mm * 60 + ss
+
+
+NMEA_WITH_CHECKSUM_RE = re.compile(r"\$[A-Z]{2}[A-Z0-9]{3},[^$\r\n]*\*[0-9A-Fa-f]{2}")
+
+
+def extract_nmea_sentences(text: str) -> list[str]:
+    candidates: list[str] = []
+    for m in NMEA_WITH_CHECKSUM_RE.finditer(text):
+        candidates.append(m.group(0).strip())
+
+    # fallback for sentences without checksum (or malformed concat edge cases)
+    for chunk in text.split("$"):
+        if not chunk.strip():
+            continue
+        candidate = "$" + chunk
+        candidate = candidate.strip()
+        if not candidate.startswith("$"):
+            continue
+        if "*" in candidate:
+            continue
+        if "," not in candidate:
+            continue
+        candidate = candidate.rstrip(" ,\t\r\n")
+        candidates.append(candidate)
+
+    # keep original order and deduplicate overlaps
+    indexed: list[tuple[int, str]] = []
+    cursor = 0
+    for sentence in candidates:
+        pos = text.find(sentence, cursor)
+        if pos < 0:
+            pos = text.find(sentence)
+        indexed.append((pos if pos >= 0 else len(text), sentence))
+        if pos >= 0:
+            cursor = pos + len(sentence)
+    indexed.sort(key=lambda x: x[0])
+
+    out: list[str] = []
+    for _, sentence in indexed:
+        if not out or out[-1] != sentence:
+            out.append(sentence)
+    return out
+
+
+def normalize_nmea_lines(input_path: Path) -> tuple[list[str], int]:
+    text = input_path.read_text(encoding="utf-8", errors="ignore")
+    physical_lines = len(text.splitlines())
+    return extract_nmea_sentences(text), physical_lines
 
 
 def slim_lines(lines: list[str], options: SlimOptions) -> tuple[list[str], SlimStats]:
@@ -97,9 +150,13 @@ def slim_lines(lines: list[str], options: SlimOptions) -> tuple[list[str], SlimS
 def slim_file(input_path: str, output_path: str, options: SlimOptions) -> SlimStats:
     in_path = Path(input_path)
     out_path = Path(output_path)
-    lines = in_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    lines, physical_lines = normalize_nmea_lines(in_path)
     result, stats = slim_lines(lines, options)
     out_path.write_text("\n".join(result) + ("\n" if result else ""), encoding="utf-8")
+    stats.physical_lines = physical_lines
+    stats.extracted_sentences = len(lines)
+    stats.no_checksum_sentences = sum(1 for line in lines if "*" not in line)
+    stats.concatenated_sentence_lines = max(0, stats.extracted_sentences - stats.physical_lines)
     stats.output_path = str(out_path)
     stats.input_size = in_path.stat().st_size
     stats.output_size = out_path.stat().st_size
