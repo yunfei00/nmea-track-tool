@@ -38,4 +38,4 @@
 ## CI/CD
 
 - Push 到 `main` / `master` / `dev` 会自动执行测试与构建，并上传 Windows 可执行文件 artifact。
-- 推送 `v*` 标签（如 `v1.0.0`）会自动执行测试与构建、打包 ZIP、创建 GitHub Release，并上传 `.exe` 与 `.zip` 资产。
+- 推送 `v*` 标签（如 `v1.0.0`）会自动执行测试与构建、打包 ZIP、创建 GitHub Release，并仅上传包含可执行文件的 `.zip` 资产。
