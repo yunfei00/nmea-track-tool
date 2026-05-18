@@ -99,5 +99,13 @@ class MainWindow(QMainWindow):
             Path(temp_out).unlink(missing_ok=True)
         self.progress.setValue(100)
         ratio = (1 - (stats.output_size / stats.input_size)) * 100 if stats.input_size else 0
-        self.stats.setText(f"原始:{stats.total_lines} 保留:{stats.kept_lines} 删除:{stats.dropped_lines} 未知删除:{stats.unknown_sentences} 非NMEA:{stats.non_nmea_lines} 输出:{output_path} 压缩:{ratio:.1f}%")
+        self.stats.setText(
+            f"物理行:{stats.physical_lines} 提取语句:{stats.extracted_sentences} 粘连拆分:{stats.concatenated_sentence_lines} "
+            f"无校验和:{stats.no_checksum_sentences} 原始:{stats.total_lines} 保留:{stats.kept_lines} 删除:{stats.dropped_lines} "
+            f"未知删除:{stats.unknown_sentences} 非NMEA:{stats.non_nmea_lines} 输出:{output_path} 压缩:{ratio:.1f}%"
+        )
+        if stats.concatenated_sentence_lines > 0:
+            self.log.appendPlainText(
+                f"检测到一行多个 NMEA，已自动拆分处理（拆分数量: {stats.concatenated_sentence_lines}）"
+            )
         self.log.appendPlainText("完成" if not preview_only else "预览完成")
