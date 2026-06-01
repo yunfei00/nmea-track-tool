@@ -116,3 +116,66 @@ def test_app_smoke_test_mode_exits(monkeypatch):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
 
     assert main(["--smoke-test"]) == 0
+
+
+def test_shift_start_datetime_updates_rmc_gga_and_checksum():
+    from datetime import datetime, timezone
+
+    lines = [
+        mk("GNRMC,083000.00,A,1,2,3,4,5,6,120326,,"),
+        mk("GNGGA,083000.00,1,2,3"),
+        mk("GNRMC,083001.50,A,1,2,3,4,5,6,120326,,"),
+        mk("GNGGA,083001.50,1,2,3"),
+    ]
+    options = SlimOptions(
+        convert_talker_to_gp=True,
+        start_datetime_utc=datetime(2026, 3, 15, 1, 0, tzinfo=timezone.utc),
+    )
+    out, _ = slim_lines(lines, options)
+
+    assert out[0].startswith("$GPRMC,010000.00,")
+    assert ",150326,," in out[0]
+    assert out[1].startswith("$GPGGA,010000.00,")
+    assert out[2].startswith("$GPRMC,010001.50,")
+    assert out[3].startswith("$GPGGA,010001.50,")
+    for sentence in out:
+        body, checksum = sentence[1:].split("*")
+        assert compute_checksum(body) == checksum
+
+
+def test_shift_start_datetime_handles_midnight_rollover():
+    from datetime import datetime, timezone
+
+    lines = [
+        mk("GPRMC,235959.00,A,1,2,3,4,5,6,120326,,"),
+        mk("GPGGA,000000.00,1,2,3"),
+        mk("GPRMC,000001.00,A,1,2,3,4,5,6,130326,,"),
+    ]
+    options = SlimOptions(start_datetime_utc=datetime(2026, 3, 15, 23, 59, 59, tzinfo=timezone.utc))
+    out, _ = slim_lines(lines, options)
+
+    assert out[0].startswith("$GPRMC,235959.00,")
+    assert ",150326,," in out[0]
+    assert out[1].startswith("$GPGGA,000000.00,")
+    assert out[2].startswith("$GPRMC,000001.00,")
+    assert ",160326,," in out[2]
+
+
+def test_shift_start_datetime_requires_a_valid_rmc_or_gga_time():
+    from datetime import datetime, timezone
+
+    options = SlimOptions(start_datetime_utc=datetime(2026, 3, 15, tzinfo=timezone.utc))
+    try:
+        slim_lines([mk("GPGSA,A,3,1,2,3")], options)
+    except ValueError as exc:
+        assert "没有可识别的 RMC/GGA 时间字段" in str(exc)
+    else:
+        raise AssertionError("expected invalid source timestamps to fail")
+
+
+def test_shift_start_datetime_is_disabled_by_default():
+    original = mk("GPRMC,083000.00,A,1,2,3,4,5,6,120326,,")
+
+    out, _ = slim_lines([original], SlimOptions())
+
+    assert out == [original]
