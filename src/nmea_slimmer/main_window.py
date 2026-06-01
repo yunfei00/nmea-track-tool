@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import timezone
 from pathlib import Path
 
+from PySide6.QtCore import QDateTime, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDateTimeEdit,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -61,6 +64,19 @@ class MainWindow(QMainWindow):
         b.addWidget(self.to_gp,4,0); b.addWidget(QLabel("GSV降频秒数"),4,1); b.addWidget(self.gsv_spin,4,2)
         root.addWidget(box)
 
+        time_box = QGroupBox("时间调整")
+        time_layout = QGridLayout(time_box)
+        self.enable_start_datetime = QCheckBox("设置输出轨迹起始时间")
+        self.start_datetime = QDateTimeEdit(QDateTime.currentDateTimeUtc())
+        self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self.start_datetime.setTimeSpec(Qt.TimeSpec.UTC)
+        self.start_datetime.setEnabled(False)
+        self.enable_start_datetime.toggled.connect(self.start_datetime.setEnabled)
+        time_layout.addWidget(self.enable_start_datetime, 0, 0)
+        time_layout.addWidget(QLabel("起始时间（UTC）"), 1, 0)
+        time_layout.addWidget(self.start_datetime, 1, 1)
+        root.addWidget(time_box)
+
         row = QHBoxLayout()
         preview = QPushButton("预览统计"); preview.clicked.connect(lambda: self.run(preview_only=True))
         start = QPushButton("开始精简"); start.clicked.connect(lambda: self.run(preview_only=False))
@@ -81,7 +97,22 @@ class MainWindow(QMainWindow):
             self.output_edit.setText(p)
 
     def _options(self) -> SlimOptions:
-        return SlimOptions(self.keep_gga.isChecked(), self.keep_rmc.isChecked(), self.keep_gsa.isChecked(), self.keep_gsv.isChecked(), self.drop_vtg.isChecked(), self.drop_gns.isChecked(), self.drop_dtm.isChecked(), self.drop_unknown.isChecked(), self.to_gp.isChecked(), self.gsv_spin.value())
+        start_datetime_utc = None
+        if self.enable_start_datetime.isChecked():
+            start_datetime_utc = self.start_datetime.dateTime().toUTC().toPython().astimezone(timezone.utc)
+        return SlimOptions(
+            keep_gga=self.keep_gga.isChecked(),
+            keep_rmc=self.keep_rmc.isChecked(),
+            keep_gsa=self.keep_gsa.isChecked(),
+            keep_gsv=self.keep_gsv.isChecked(),
+            drop_vtg=self.drop_vtg.isChecked(),
+            drop_gns=self.drop_gns.isChecked(),
+            drop_dtm=self.drop_dtm.isChecked(),
+            drop_unknown=self.drop_unknown.isChecked(),
+            convert_talker_to_gp=self.to_gp.isChecked(),
+            gsv_interval_sec=self.gsv_spin.value(),
+            start_datetime_utc=start_datetime_utc,
+        )
 
     def run(self, preview_only: bool):
         input_path = self.input_edit.text().strip()
@@ -94,7 +125,15 @@ class MainWindow(QMainWindow):
             self.output_edit.setText(output_path)
         self.progress.setValue(20)
         temp_out = output_path if not preview_only else str(Path(output_path).with_suffix(".preview.nmea"))
-        stats = slim_file(input_path, temp_out, self._options())
+        try:
+            stats = slim_file(input_path, temp_out, self._options())
+        except ValueError as exc:
+            self.log.appendPlainText(str(exc))
+            self.progress.setValue(0)
+            return
+        if self.enable_start_datetime.isChecked():
+            value = self.start_datetime.dateTime().toUTC().toString("yyyy-MM-ddTHH:mm:ss'Z'")
+            self.log.appendPlainText(f"已将输出轨迹起始时间设置为：{value}")
         if preview_only:
             Path(temp_out).unlink(missing_ok=True)
         self.progress.setValue(100)

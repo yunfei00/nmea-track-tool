@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 import re
 from typing import Dict
 
 from .checksum import with_checksum
 from .nmea_parser import parse_line
+from .time_shift import shift_start_datetime
 
 
 @dataclass
@@ -21,6 +23,7 @@ class SlimOptions:
     drop_unknown: bool = True
     convert_talker_to_gp: bool = False
     gsv_interval_sec: int = 0
+    start_datetime_utc: datetime | None = None
 
 
 @dataclass
@@ -144,6 +147,8 @@ def slim_lines(lines: list[str], options: SlimOptions) -> tuple[list[str], SlimS
         stats.kept_lines += 1
 
     stats.dropped_lines = stats.total_lines - stats.kept_lines
+    if options.start_datetime_utc is not None:
+        out = shift_start_datetime(out, options.start_datetime_utc)
     return out, stats
 
 
